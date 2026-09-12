@@ -248,12 +248,9 @@ export function HomeClient({ products }: { products: Product[] }) {
   const [stockById, setStockById] = useState<Record<string, number>>({});
   const [cartNotice, setCartNotice] = useState<string | null>(null);
   const [isCartOpen, setIsCartOpen] = useState(false);
-  // Login state used to be plain in-memory useState — nothing survived a
-  // refresh, so any reload (including the one Razorpay's checkout can
-  // trigger mid-payment on some flows) logged the customer straight out and
-  // they had to re-enter their phone number again. Now backed by
-  // localStorage: restored on mount (see the effect below), written on
-  // login, cleared on logout.
+  // UI auth state is restored from the server-side HttpOnly session after
+  // mount. The browser never persists or supplies the phone as proof of
+  // authentication.
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [authPhone, setAuthPhone] = useState<string | null>(null);
@@ -540,11 +537,8 @@ export function HomeClient({ products }: { products: Product[] }) {
     void refreshStock();
   }, []);
 
-  // Restore login from a previous visit/refresh. Deliberately not read via a
-  // useState lazy initializer (that would run during SSR too, where
-  // localStorage doesn't exist, and risk a hydration mismatch) — instead
-  // every render starts logged-out, then this effect syncs in the real
-  // state right after mount, client-side only.
+  // Restore login from the server-side session after hydration so SSR and
+  // client markup remain identical while the HttpOnly cookie stays private.
   useEffect(() => {
     void fetch("/api/auth/session")
       .then(async (response) => {

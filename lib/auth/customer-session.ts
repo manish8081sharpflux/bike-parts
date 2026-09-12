@@ -5,6 +5,9 @@ import { prisma } from "@/lib/db";
 export const CUSTOMER_SESSION_COOKIE = "bikeparts_customer_session";
 const OTP_TTL_MS = 5 * 60 * 1000;
 const SESSION_TTL_SECONDS = 30 * 24 * 60 * 60;
+let lastAuthCleanupAt = 0;
+
+export class CustomerAuthConfigurationError extends Error {}
 
 export function normalizeCustomerPhone(phone: unknown) {
   return typeof phone === "string" ? phone.trim() : "";
@@ -14,8 +17,20 @@ export function isValidCustomerPhone(phone: string) {
   return /^\d{10}$/.test(phone);
 }
 
-function hash(value: string) {
-  return crypto.createHash("sha256").update(value).digest("hex");
+function getOtpHashSecret() {
+  if (process.env.CUSTOMER_OTP_HASH_SECRET) return process.env.CUSTOMER_OTP_HASH_SECRET;
+  if (process.env.NODE_ENV === "production") {
+    throw new CustomerAuthConfigurationError("CUSTOMER_OTP_HASH_SECRET is not configured.");
+  }
+  return "development-only-customer-otp-secret";
+}
+
+export function hashOtp(phone: string, otp: string) {
+  return crypto.createHmac("sha256", getOtpHashSecret()).update(`${phone}:${otp}`).digest();
+}
+
+function hashSessionToken(value: string) {
+  return crypto.createHmac("sha256", getOtpHashSecret()).update(`session:${value}`).digest("hex");
 }
 
 export function generateOtp() {
@@ -23,6 +38,10 @@ export function generateOtp() {
 }
 
 export async function issueCustomerOtp(phone: string) {
+  if (Date.now() - lastAuthCleanupAt > 10 * 60 * 1000) {
+    lastAuthCleanupAt = Date.now();
+    void cleanupExpiredCustomerAuthData().catch(() => {});
+  }
   const otp = generateOtp();
   const existing = await prisma.customerOtpChallenge.findUnique({ where: { phone } });
   if (existing && Date.now() - existing.createdAt.getTime() < 30_000) {
@@ -31,13 +50,13 @@ export async function issueCustomerOtp(phone: string) {
   await prisma.customerOtpChallenge.upsert({
     where: { phone },
     update: {
-      codeHash: hash(otp),
+      codeHash: hashOtp(phone, otp).toString("hex"),
       expiresAt: new Date(Date.now() + OTP_TTL_MS),
       attempts: 0,
       usedAt: null,
       createdAt: new Date(),
     },
-    create: { phone, codeHash: hash(otp), expiresAt: new Date(Date.now() + OTP_TTL_MS) },
+    create: { phone, codeHash: hashOtp(phone, otp).toString("hex"), expiresAt: new Date(Date.now() + OTP_TTL_MS) },
   });
   return otp;
 }
@@ -46,7 +65,7 @@ export async function createCustomerSession(userId: string) {
   const token = crypto.randomBytes(32).toString("base64url");
   const expiresAt = new Date(Date.now() + SESSION_TTL_SECONDS * 1000);
   await prisma.customerSession.create({
-    data: { userId, tokenHash: hash(token), expiresAt },
+    data: { userId, tokenHash: hashSessionToken(token), expiresAt },
   });
   const store = await cookies();
   store.set(CUSTOMER_SESSION_COOKIE, token, {
@@ -64,7 +83,7 @@ export async function getCustomerSession() {
   if (!token) return null;
 
   const session = await prisma.customerSession.findUnique({
-    where: { tokenHash: hash(token) },
+    where: { tokenHash: hashSessionToken(token) },
     include: { user: true },
   });
   if (!session) return null;
@@ -79,7 +98,24 @@ export async function clearCustomerSession() {
   const store = await cookies();
   const token = store.get(CUSTOMER_SESSION_COOKIE)?.value;
   if (token) {
-    await prisma.customerSession.deleteMany({ where: { tokenHash: hash(token) } });
+    await prisma.customerSession.deleteMany({ where: { tokenHash: hashSessionToken(token) } });
   }
   store.delete(CUSTOMER_SESSION_COOKIE);
+}
+
+export async function cleanupExpiredCustomerAuthData() {
+  await prisma.customerSession.deleteMany({ where: { expiresAt: { lt: new Date() } } });
+  await prisma.customerOtpChallenge.deleteMany({
+    where: {
+      OR: [
+        { expiresAt: { lt: new Date(Date.now() - 60 * 60 * 1000) } },
+        { usedAt: { not: null } },
+      ],
+    },
+  });
+}
+
+export function hashesMatch(storedHex: string, candidate: Buffer) {
+  const stored = Buffer.from(storedHex, "hex");
+  return stored.length === candidate.length && crypto.timingSafeEqual(stored, candidate);
 }

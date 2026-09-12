@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
+    "test:customer-auth": "node --test scripts/customer-auth.test.mjs",
     "meilisearch:up": "node scripts/start-meilisearch.mjs",
     "meilisearch:seed": "node scripts/seed-meilisearch.mjs",
     "health": "node scripts/check-platform-health.mjs",

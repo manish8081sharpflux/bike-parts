@@ -2,15 +2,17 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import {
   createCustomerSession,
+  hashOtp,
+  hashesMatch,
   isValidCustomerPhone,
   normalizeCustomerPhone,
 } from "@/lib/auth/customer-session";
-import crypto from "node:crypto";
-import { assertOtpRateLimit, getClientIp, OtpRateLimitError } from "@/lib/auth/otp-rate-limit";
-
-function hash(value: string) {
-  return crypto.createHash("sha256").update(value).digest("hex");
-}
+import {
+  assertOtpRateLimit,
+  getClientIp,
+  OtpRateLimitError,
+  OtpRateLimitUnavailableError,
+} from "@/lib/auth/otp-rate-limit";
 
 export async function POST(request: Request) {
   const body = await request.json().catch(() => null);
@@ -21,9 +23,12 @@ export async function POST(request: Request) {
   }
 
   try {
-    assertOtpRateLimit(`verify:phone:${phone}`, 10, 15 * 60 * 1000);
-    assertOtpRateLimit(`verify:ip:${getClientIp(request)}`, 30, 15 * 60 * 1000);
+    await assertOtpRateLimit(`verify:phone:${phone}`, 10, 15 * 60 * 1000);
+    await assertOtpRateLimit(`verify:ip:${getClientIp(request)}`, 30, 15 * 60 * 1000);
   } catch (error) {
+    if (error instanceof OtpRateLimitUnavailableError) {
+      return NextResponse.json({ error: "OTP service is temporarily unavailable." }, { status: 503 });
+    }
     const message = error instanceof OtpRateLimitError || error instanceof Error
       ? error.message
       : "Too many OTP attempts. Please try again later.";
@@ -34,7 +39,7 @@ export async function POST(request: Request) {
   if (!challenge || challenge.usedAt || challenge.expiresAt <= new Date() || challenge.attempts >= 5) {
     return NextResponse.json({ error: "That OTP is invalid or expired." }, { status: 400 });
   }
-  if (hash(otp) !== challenge.codeHash) {
+  if (!hashesMatch(challenge.codeHash, hashOtp(phone, otp))) {
     await prisma.customerOtpChallenge.update({
       where: { id: challenge.id },
       data: { attempts: { increment: 1 } },
@@ -42,10 +47,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "That OTP is invalid or expired." }, { status: 400 });
   }
 
-  await prisma.customerOtpChallenge.update({
-    where: { id: challenge.id },
+  const consumed = await prisma.customerOtpChallenge.updateMany({
+    where: {
+      id: challenge.id,
+      usedAt: null,
+      expiresAt: { gt: new Date() },
+      attempts: { lt: 5 },
+    },
     data: { usedAt: new Date() },
   });
+  if (consumed.count !== 1) {
+    return NextResponse.json({ error: "That OTP is invalid or expired." }, { status: 400 });
+  }
   const user = await prisma.user.upsert({
     where: { phone },
     update: {},

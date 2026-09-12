@@ -1,3 +1,10 @@
+- **Customer auth**: Customers verify a 6-digit OTP through `/api/auth/otp/*`.
+  OTP hashes use `CUSTOMER_OTP_HASH_SECRET`, challenges are one-time and
+  expiring, and authenticated requests use the HttpOnly
+  `bikeparts_customer_session` cookie. Redis (`REDIS_URL`) provides shared
+  phone/IP rate limits. Local E2E may set `CUSTOMER_OTP_DEV_MODE=true`; this
+  must never be enabled in production. Production SMS currently supports
+  Twilio via `CUSTOMER_SMS_PROVIDER=twilio` and the `TWILIO_*` variables.
 # Bike Parts Marketplace Platform Stack
 
 ## Implemented in this pass
@@ -73,9 +80,10 @@ values are exposed to the browser.
 - **Schema**: `Order`/`OrderItem`/`OrderEvent` extended for payments and
   delivery (`paymentStatus`, `razorpayOrderId/PaymentId/Signature`,
   `porterOrderId/Status/TrackingUrl`, `taxAmount`, denormalized order-item
-  snapshots). `User.email` is now optional and `User.phone` unique, since the
-  storefront's login is phone-only. `BikePartListing.sellerId` is optional so
-  admin-created products don't need a marketplace seller.
+  snapshots). `User.email` is now optional and `User.phone` unique. Customer
+  login uses OTP verification and a server-side session cookie.
+  `BikePartListing.sellerId` is optional so admin-created products don't need a
+  marketplace seller.
 - **Admin auth**: `ADMIN_EMAIL` / `ADMIN_PASSWORD` in env, checked in
   `lib/auth/admin-session.ts`; a signed (HMAC, `ADMIN_SESSION_SECRET`) session
   cookie gates `/admin/**` and `/api/admin/**` via `proxy.ts` (Next 16 renamed

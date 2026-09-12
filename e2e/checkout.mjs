@@ -34,12 +34,23 @@ async function main() {
   await page.getByRole("button", { name: /Proceed to (Checkout|Login)/ }).click();
   await page.waitForTimeout(300);
 
-  // Phone + OTP login — no real OTP is sent/checked (see LoginModal), any 6 digits work.
+    // Local E2E runs use CUSTOMER_OTP_DEV_MODE=true. Capture the actual OTP
+    // returned by the development-only endpoint; production never returns it.
   await page.getByPlaceholder("Enter mobile number").fill("9876500099");
+    const otpResponsePromise = page.waitForResponse(
+      (r) => r.url().includes("/api/auth/otp/send") && r.request().method() === "POST"
+    );
   await page.getByRole("button", { name: "Continue" }).click();
+    const otpResponse = await otpResponsePromise;
+    const otpData = await otpResponse.json();
+    if (!otpData.developmentOtp) {
+      throw new Error("E2E requires CUSTOMER_OTP_DEV_MODE=true and a development OTP response.");
+    }
   await page.waitForTimeout(300);
   const otpInputs = page.getByLabel(/OTP digit/);
-  for (let i = 0; i < (await otpInputs.count()); i++) await otpInputs.nth(i).fill("1");
+    for (const [index, digit] of [...otpData.developmentOtp].entries()) {
+      await otpInputs.nth(index).fill(digit);
+    }
   await page.getByRole("button", { name: "Verify & Continue" }).click();
   await page.waitForTimeout(500);
 
