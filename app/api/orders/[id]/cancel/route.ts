@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getCustomerSession } from "@/lib/auth/customer-session";
-import { requestRefund } from "@/lib/order-refund-state";
+import { cancelCustomerOrder } from "@/lib/order-delivery-state";
 
 /**
  * Customer-initiated order cancellation. Ownership comes from the session.
@@ -22,23 +22,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: "Order not found." }, { status: 404 });
   }
 
-  if (order.status === "CANCELLED") {
-    return NextResponse.json({ error: "This order is already cancelled." }, { status: 409 });
-  }
-  if (order.status === "DELIVERED") {
-    return NextResponse.json({ error: "This order has already been delivered and can't be cancelled." }, { status: 409 });
+  if (!(["PENDING", "PAID"] as const).includes(order.status as "PENDING" | "PAID") || order.porterOrderId) {
+    return NextResponse.json({ error: "This order can no longer be cancelled after fulfillment has started." }, { status: 409 });
   }
 
-  const shouldAutoRequestRefund = order.paymentStatus === "PAID" && order.refundStatus !== "REFUNDED";
-  await prisma.$transaction(async (tx) => {
-    const cancelled = await tx.order.updateMany({
-      where: { id, buyerId: session.user.id, status: { not: "CANCELLED" }, paymentStatus: order.paymentStatus },
-      data: { status: "CANCELLED" },
-    });
-    if (cancelled.count !== 1) throw new Error("This order changed before cancellation completed.");
-    await tx.orderEvent.create({ data: { orderId: id, type: "STATUS_CHANGE", message: "Order cancelled by customer." } });
-    if (shouldAutoRequestRefund) await requestRefund(id, "Cancelled by customer", tx);
-  });
+  const { cancelled: cancellationWon } = await cancelCustomerOrder(id, session.user.id);
+
+  if (!cancellationWon) {
+    return NextResponse.json({ error: "This order can no longer be cancelled after fulfillment has started." }, { status: 409 });
+  }
 
   return NextResponse.json({ ok: true });
 }

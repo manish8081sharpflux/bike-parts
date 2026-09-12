@@ -111,6 +111,10 @@ values are exposed to the browser.
   API v1 shape (quote/create/track). Porter's actual contract is
   partner-specific — adjust `PORTER_API_BASE_URL` and the payload builders in
   that file to match your partner docs if they differ.
+  Production requires `PORTER_ENV=production`, an explicit non-UAT
+  `PORTER_API_BASE_URL`, all warehouse address variables, and uses a bounded
+  HTTP timeout. Uncertain dispatch outcomes remain marked for reconciliation;
+  `pnpm reconcile:porter` reports them without retrying delivery creation.
 - **First-time setup**:
   ```bash
   # fill in DATABASE_URL, RAZORPAY_KEY_ID/SECRET, PORTER_API_KEY in .env.local

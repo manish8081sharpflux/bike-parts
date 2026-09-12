@@ -19,6 +19,19 @@
  */
 
 const DEFAULT_BASE_URL = "https://pfe-apigw-uat.porter.in";
+const DEFAULT_TIMEOUT_MS = 10_000;
+
+export class PorterRequestError extends Error {
+  uncertain: boolean;
+  status?: number;
+
+  constructor(message: string, options: { uncertain: boolean; status?: number }) {
+    super(message);
+    this.name = "PorterRequestError";
+    this.uncertain = options.uncertain;
+    this.status = options.status;
+  }
+}
 
 export type PorterAddress = {
   contactName: string;
@@ -39,34 +52,59 @@ export type PorterOrderResult = {
 };
 
 export function isPorterConfigured() {
-  return Boolean(process.env.PORTER_API_KEY);
+  try {
+    getPorterConfig();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function assertPorterConfigured() {
+  getPorterConfig();
 }
 
 function getBaseUrl() {
-  return process.env.PORTER_API_BASE_URL?.replace(/\/$/, "") || DEFAULT_BASE_URL;
+  const environment = process.env.PORTER_ENV?.toLowerCase();
+  const configured = process.env.PORTER_API_BASE_URL?.replace(/\/$/, "");
+  if (process.env.NODE_ENV === "production") {
+    if (environment !== "production" || !configured || /uat|sandbox|staging/i.test(configured)) {
+      throw new Error("Porter production requires PORTER_ENV=production and an explicit production PORTER_API_BASE_URL.");
+    }
+    return configured;
+  }
+  return configured || DEFAULT_BASE_URL;
 }
 
-function getApiKey() {
+function getPorterConfig() {
   const key = process.env.PORTER_API_KEY;
   if (!key) {
     throw new Error("Porter is not configured. Set PORTER_API_KEY in .env.local.");
   }
-  return key;
+  return { key, baseUrl: getBaseUrl() };
 }
 
 async function porterFetch(path: string, init: RequestInit) {
-  const apiKey = getApiKey();
-  const res = await fetch(`${getBaseUrl()}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      ...(process.env.PORTER_CLIENT_ID
-        ? { "x-client-id": process.env.PORTER_CLIENT_ID }
-        : {}),
-      ...init.headers,
-    },
-  });
+  const config = getPorterConfig();
+  let res: Response;
+  try {
+    res = await fetch(`${config.baseUrl}${path}`, {
+      ...init,
+      signal: init.signal ?? AbortSignal.timeout(Number(process.env.PORTER_HTTP_TIMEOUT_MS ?? DEFAULT_TIMEOUT_MS)),
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": config.key,
+        ...(process.env.PORTER_CLIENT_ID
+          ? { "x-client-id": process.env.PORTER_CLIENT_ID }
+          : {}),
+        ...init.headers,
+      },
+    });
+  } catch {
+    throw new PorterRequestError("Porter request outcome is uncertain.", {
+      uncertain: true,
+    });
+  }
 
   const text = await res.text();
   let json: unknown = null;
@@ -77,8 +115,9 @@ async function porterFetch(path: string, init: RequestInit) {
   }
 
   if (!res.ok) {
-    throw new Error(
-      `Porter API error (${res.status} ${res.statusText}): ${text || "no response body"}`
+    throw new PorterRequestError(
+      `Porter API error (${res.status} ${res.statusText}): ${text || "no response body"}`,
+      { uncertain: res.status >= 500, status: res.status }
     );
   }
 

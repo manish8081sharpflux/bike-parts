@@ -4,7 +4,12 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { requireAdminAction } from "@/lib/auth/require-admin";
-import { createPorterDelivery, getPorterDeliveryStatus, isPorterConfigured } from "@/lib/porter";
+import {
+  createPorterDelivery,
+  getPorterDeliveryStatus,
+  assertPorterConfigured,
+  PorterRequestError,
+} from "@/lib/porter";
 import { createRazorpayRefund, isRazorpayConfigured } from "@/lib/razorpay";
 import {
   claimRefundRequest,
@@ -13,6 +18,7 @@ import {
   markRefundSucceeded,
   requestRefund,
 } from "@/lib/order-refund-state";
+import { claimPorterDispatch } from "@/lib/order-delivery-state";
 import type { OrderStatus } from "@prisma/client";
 
 const ORDER_STATUSES: OrderStatus[] = [
@@ -84,6 +90,13 @@ export async function updateOrderStatusAction(orderId: string, formData: FormDat
 
   const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
 
+  if (
+    statusRaw === "CANCELLED" &&
+    (order.porterOrderId || ["SHIPPED", "OUT_FOR_DELIVERY", "DELIVERED"].includes(order.status))
+  ) {
+    redirect(`/admin/orders/${orderId}?error=${encodeURIComponent("Dispatched orders require Porter cancellation/reconciliation before local cancellation.")}`);
+  }
+
   // Cancelling an order that was already paid for means the customer is now
   // owed money back. Auto-create the refund request right here instead of
   // waiting on the customer to notice and ask for one — this is also what
@@ -126,9 +139,6 @@ export async function updateOrderStatusAction(orderId: string, formData: FormDat
 
 export async function dispatchOrderAction(orderId: string) {
   await requireAdminAction();
-
-  // "Claimed" once the atomic guard below succeeds — tracked so the catch
-  // block knows whether it needs to release the claim on failure.
   let claimed = false;
 
   try {
@@ -137,46 +147,48 @@ export async function dispatchOrderAction(orderId: string) {
     if (order.paymentStatus !== "PAID") {
       throw new Error("Order must be paid before it can be dispatched for delivery.");
     }
+    if (!(order.status === "PAID" || order.status === "PACKED")) {
+      throw new Error("This order is not in a dispatchable fulfillment state.");
+    }
     if (order.porterOrderId) {
       throw new Error("This order has already been dispatched with Porter.");
     }
-    if (!isPorterConfigured()) {
-      throw new Error("Porter is not configured. Set PORTER_API_KEY in .env.local.");
+    assertPorterConfigured();
+    if (
+      process.env.NODE_ENV === "production" &&
+      (!process.env.WAREHOUSE_CONTACT_NAME ||
+        !process.env.WAREHOUSE_PHONE ||
+        !process.env.WAREHOUSE_ADDRESS_LINE1 ||
+        !process.env.WAREHOUSE_CITY ||
+        !/^\d{6}$/.test(process.env.WAREHOUSE_PINCODE ?? ""))
+    ) {
+      throw new Error("Production warehouse configuration is incomplete.");
     }
 
-    // Atomically claim this order before calling Porter — the check above
-    // reads then acts, which isn't safe against two near-simultaneous
-    // clicks (or two admin tabs) both passing the `porterOrderId` check
-    // before either has written anything, both then calling Porter and
-    // creating two real courier deliveries for one order. This conditional
-    // update only succeeds (count 1) for whichever request gets there
-    // first; the loser sees count 0 and bails out before ever calling
-    // Porter, exactly like reserveStock's atomic decrement in
-    // lib/checkout-stock.ts for the same class of race.
-    const claim = await prisma.order.updateMany({
-      where: { id: orderId, porterOrderId: null, paymentStatus: "PAID" },
-      data: { porterOrderId: "DISPATCHING" },
-    });
-    if (claim.count === 0) {
+    const address = (order.deliveryAddress ?? {}) as DeliveryAddress;
+    const line1 = [address.flatNo, address.floor, address.area].filter(Boolean).join(", ");
+    if (!order.customerName.trim() || !/^\d{10}$/.test(order.customerPhone) || !line1 || !address.city || !/^\d{6}$/.test(address.pincode ?? "")) {
+      throw new Error("Delivery address is incomplete. Contact name, phone, address, city, and pincode are required.");
+    }
+
+    if (!(await claimPorterDispatch(orderId))) {
       throw new Error("This order has already been dispatched with Porter.");
     }
     claimed = true;
 
-    const address = (order.deliveryAddress ?? {}) as DeliveryAddress;
-
     const result = await createPorterDelivery({
       orderId: order.id,
       pickup: {
-        contactName: process.env.WAREHOUSE_CONTACT_NAME ?? "Deep Automobiles Warehouse",
-        contactPhone: process.env.WAREHOUSE_PHONE ?? "9999999999",
-        line1: process.env.WAREHOUSE_ADDRESS_LINE1 ?? "Deep Automobiles Warehouse",
-        city: process.env.WAREHOUSE_CITY ?? "Patna",
-        pincode: process.env.WAREHOUSE_PINCODE ?? "800001",
+        contactName: process.env.WAREHOUSE_CONTACT_NAME!,
+        contactPhone: process.env.WAREHOUSE_PHONE!,
+        line1: process.env.WAREHOUSE_ADDRESS_LINE1!,
+        city: process.env.WAREHOUSE_CITY!,
+        pincode: process.env.WAREHOUSE_PINCODE!,
       },
       drop: {
         contactName: address.contactName || order.customerName,
         contactPhone: order.customerPhone,
-        line1: [address.flatNo, address.floor, address.area].filter(Boolean).join(", "),
+        line1,
         line2: address.landmark ?? "",
         city: address.city ?? "",
         pincode: address.pincode ?? "",
@@ -184,32 +196,38 @@ export async function dispatchOrderAction(orderId: string) {
       amount: Number(order.amount),
     });
 
-    await prisma.order.update({
-      where: { id: orderId },
-      data: {
-        porterOrderId: result.porterOrderId,
-        porterStatus: result.status,
-        porterTrackingUrl: result.trackingUrl,
-        status: "SHIPPED",
-      },
-    });
+    if (!result.porterOrderId) {
+      throw new PorterRequestError("Porter returned no delivery identifier; reconciliation is required.", { uncertain: true });
+    }
 
-    await prisma.orderEvent.create({
-      data: {
-        orderId,
-        type: "DISPATCHED",
-        message: `Dispatched via Porter (order ${result.porterOrderId})`,
-      },
+    await prisma.$transaction(async (tx) => {
+      const completed = await tx.order.updateMany({
+        where: { id: orderId, porterOrderId: "DISPATCHING" },
+        data: {
+          porterOrderId: result.porterOrderId,
+          porterStatus: result.status,
+          porterTrackingUrl: result.trackingUrl,
+          status: "SHIPPED",
+          porterReconciliationRequired: false,
+          porterLastError: null,
+        },
+      });
+      if (completed.count !== 1) throw new Error("Dispatch claim is no longer current.");
+      await tx.orderEvent.create({ data: { orderId, type: "PORTER_DISPATCHED", message: `Dispatched via Porter (order ${result.porterOrderId})` } });
     });
   } catch (error) {
-    // The Porter API call itself failed after the claim succeeded (network
-    // error, Porter rejected the request, etc.) — release the claim so the
-    // order isn't stuck permanently showing "already dispatched" when no
-    // real delivery was ever created.
     if (claimed) {
-      await prisma.order
-        .update({ where: { id: orderId }, data: { porterOrderId: null } })
-        .catch(() => {});
+      const failureMessage = error instanceof Error ? error.message : "Could not dispatch this order.";
+      const uncertain = error instanceof PorterRequestError && error.uncertain;
+      await prisma.$transaction(async (tx) => {
+        if (uncertain) {
+          await tx.order.updateMany({ where: { id: orderId, porterOrderId: "DISPATCHING" }, data: { porterStatus: "RECONCILIATION_REQUIRED", porterReconciliationRequired: true, porterLastError: failureMessage } });
+          await tx.orderEvent.create({ data: { orderId, type: "PORTER_RECONCILIATION_REQUIRED", message: failureMessage } });
+        } else {
+          await tx.order.updateMany({ where: { id: orderId, porterOrderId: "DISPATCHING" }, data: { porterOrderId: null, porterStatus: null, porterLastError: failureMessage } });
+          await tx.orderEvent.create({ data: { orderId, type: "PORTER_DISPATCH_FAILED", message: failureMessage } });
+        }
+      });
     }
     const message = error instanceof Error ? error.message : "Could not dispatch this order.";
     redirect(`/admin/orders/${orderId}?error=${encodeURIComponent(message)}`);
@@ -225,7 +243,7 @@ export async function refreshDeliveryStatusAction(orderId: string) {
 
   try {
     const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
-    if (!order.porterOrderId) {
+    if (!order.porterOrderId || order.porterOrderId === "DISPATCHING" || order.porterReconciliationRequired) {
       throw new Error("This order has not been dispatched yet.");
     }
 

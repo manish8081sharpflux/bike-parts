@@ -183,6 +183,9 @@ model Order {
   porterOrderId     String?
   porterStatus      String?
   porterTrackingUrl String?
+  porterReconciliationRequired Boolean @default(false)
+  porterLastError   String?
+  porterAttemptedAt DateTime?
   deliveryAddress   Json
   bikeLabel         String?
   adminNote         String?
