@@ -6,6 +6,13 @@ import { prisma } from "@/lib/db";
 import { requireAdminAction } from "@/lib/auth/require-admin";
 import { createPorterDelivery, getPorterDeliveryStatus, isPorterConfigured } from "@/lib/porter";
 import { createRazorpayRefund, isRazorpayConfigured } from "@/lib/razorpay";
+import {
+  claimRefundRequest,
+  markRefundFailed,
+  markRefundNeedsReconciliation,
+  markRefundSucceeded,
+  requestRefund,
+} from "@/lib/order-refund-state";
 import type { OrderStatus } from "@prisma/client";
 
 const ORDER_STATUSES: OrderStatus[] = [
@@ -86,39 +93,25 @@ export async function updateOrderStatusAction(orderId: string, formData: FormDat
   const shouldAutoRequestRefund =
     statusRaw === "CANCELLED" && order.paymentStatus === "PAID" && order.refundStatus === "NONE";
 
-  await prisma.order.update({
-    where: { id: orderId },
-    data: {
-      status: statusRaw as OrderStatus,
-      adminNote: adminNote || undefined,
-      ...(shouldAutoRequestRefund
-        ? {
-            refundStatus: "REQUESTED" as const,
-            refundReason: "Order cancelled by admin",
-            refundAmount: order.amount,
-            refundRequestedAt: new Date(),
-          }
-        : {}),
-    },
-  });
-
-  await prisma.orderEvent.create({
-    data: {
-      orderId,
-      type: "STATUS_CHANGE",
-      message: `Status changed to ${statusRaw}${adminNote ? ` — ${adminNote}` : ""}`,
-    },
-  });
-
-  if (shouldAutoRequestRefund) {
-    await prisma.orderEvent.create({
+  await prisma.$transaction(async (tx) => {
+    await tx.order.update({
+      where: { id: orderId },
+      data: { status: statusRaw as OrderStatus, adminNote: adminNote || undefined },
+    });
+    await tx.orderEvent.create({
       data: {
         orderId,
-        type: "REFUND_REQUESTED",
-        message: "Refund auto-requested — order was cancelled by admin after payment was already made.",
+        type: "STATUS_CHANGE",
+        message: `Status changed to ${statusRaw}${adminNote ? ` — ${adminNote}` : ""}`,
       },
     });
-  }
+    if (shouldAutoRequestRefund) {
+      const refundRequest = await requestRefund(orderId, "Order cancelled by admin", tx);
+      if (refundRequest === "not_refundable") {
+        throw new Error("The paid order changed before its refund request could be created.");
+      }
+    }
+  });
 
   revalidatePath(`/admin/orders/${orderId}`);
   revalidatePath("/admin/orders");
@@ -286,75 +279,29 @@ export async function approveRefundAction(orderId: string, formData: FormData) {
 
   const adminNote = String(formData.get("refundAdminNote") ?? "").trim();
 
-  // "Claimed" the same way dispatchOrderAction claims an order before
-  // calling Porter — refunding is a real, non-reversible money movement, so
-  // two near-simultaneous clicks (or two admin tabs) must not both pass the
-  // REQUESTED check and both call Razorpay. Only the request that flips
-  // refundStatus REQUESTED -> "claim" wins; the loser sees count 0.
-  let claimed = false;
-
   try {
-    const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
-
-    if (order.refundStatus !== "REQUESTED") {
-      throw new Error("This order has no pending refund request.");
-    }
-    if (!order.razorpayPaymentId) {
-      throw new Error("This order has no Razorpay payment to refund.");
-    }
     if (!isRazorpayConfigured()) {
       throw new Error("Razorpay is not configured. Set RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET in .env.local.");
     }
 
-    const claim = await prisma.order.updateMany({
-      where: { id: orderId, refundStatus: "REQUESTED" },
-      // Atomically flip REQUESTED -> PROCESSING. This condition can only
-      // ever match and succeed once — a second, near-simultaneous approve
-      // click (or a second admin tab) reads refundStatus as PROCESSING
-      // already and its updateMany matches zero rows, so only one caller
-      // ever proceeds to actually call Razorpay below.
-      data: { refundStatus: "PROCESSING", refundAdminNote: adminNote || null },
-    });
-    if (claim.count === 0) {
+    const claim = await claimRefundRequest(orderId, adminNote);
+    if (!claim.claimed || !claim.paymentId || claim.amount === undefined) {
       throw new Error("This order has no pending refund request.");
     }
-    claimed = true;
-
-    const refundAmount = order.refundAmount ?? order.amount;
-    const amountInPaise = Math.round(Number(refundAmount) * 100);
 
     const refund = await createRazorpayRefund({
-      paymentId: order.razorpayPaymentId,
-      amountInPaise,
-      notes: { orderId: order.id },
+      paymentId: claim.paymentId,
+      amountInPaise: Math.round(claim.amount * 100),
+      notes: { orderId },
     });
-
-    await prisma.order.update({
-      where: { id: orderId },
-      data: {
-        refundStatus: "REFUNDED",
-        paymentStatus: "REFUNDED",
-        status: "CANCELLED",
-        razorpayRefundId: refund.id,
-        refundProcessedAt: new Date(),
-      },
-    });
-
-    await prisma.orderEvent.create({
-      data: {
-        orderId,
-        type: "REFUND_APPROVED",
-        message: `Refund of ₹${refundAmount} approved and processed via Razorpay (refund ${refund.id})${
-          adminNote ? ` — ${adminNote}` : ""
-        }`,
-      },
-    });
+    await markRefundSucceeded(orderId, refund.id);
   } catch (error) {
-    // The Razorpay call itself failed after the claim succeeded — leave the
-    // request claimed rather than silently reverting to REQUESTED, since an
-    // admin retrying blind could end up calling Razorpay twice for the same
-    // order. Surface the error so they can investigate before retrying.
     const message = error instanceof Error ? error.message : "Could not process this refund.";
+    if (error instanceof Error && /timeout|timed out|network|socket|ECONNRESET|ETIMEDOUT/i.test(error.message)) {
+      await markRefundNeedsReconciliation(orderId, message).catch(() => {});
+    } else if (message !== "This order has no pending refund request.") {
+      await markRefundFailed(orderId, message).catch(() => {});
+    }
     redirect(`/admin/orders/${orderId}?error=${encodeURIComponent(message)}`);
   }
 
@@ -372,22 +319,19 @@ export async function rejectRefundAction(orderId: string, formData: FormData) {
     redirect(`/admin/orders/${orderId}?error=${encodeURIComponent("A note is required so the customer knows why.")}`);
   }
 
-  const claim = await prisma.order.updateMany({
-    where: { id: orderId, refundStatus: "REQUESTED" },
-    data: { refundStatus: "REJECTED", refundAdminNote: adminNote },
+  const rejected = await prisma.$transaction(async (tx) => {
+    const claim = await tx.order.updateMany({
+      where: { id: orderId, paymentStatus: "PAID", refundStatus: "REQUESTED" },
+      data: { refundStatus: "REJECTED", refundAdminNote: adminNote },
+    });
+    if (claim.count !== 1) return false;
+    await tx.orderEvent.create({
+      data: { orderId, type: "REFUND_REJECTED", message: `Refund request rejected — ${adminNote}` },
+    });
+    return true;
   });
 
-  if (claim.count === 0) {
-    redirect(`/admin/orders/${orderId}?error=${encodeURIComponent("This order has no pending refund request.")}`);
-  }
-
-  await prisma.orderEvent.create({
-    data: {
-      orderId,
-      type: "REFUND_REJECTED",
-      message: `Refund request rejected — ${adminNote}`,
-    },
-  });
+  if (!rejected) redirect(`/admin/orders/${orderId}?error=${encodeURIComponent("This order has no pending refund request.")}`);
 
   revalidatePath(`/admin/orders/${orderId}`);
   revalidatePath("/admin/orders");

@@ -11,6 +11,8 @@
     "test:customer-auth": "node --test scripts/customer-auth.test.mjs",
     "test:checkout-inventory": "tsx --test scripts/checkout-inventory.test.ts",
     "test:checkout-payment-race": "tsx --test scripts/checkout-payment-race.test.ts",
+    "test:order-refund-state": "tsx --test scripts/order-refund-state.test.ts",
+    "reconcile:payments": "tsx scripts/reconcile-payments.ts",
     "meilisearch:up": "node scripts/start-meilisearch.mjs",
     "meilisearch:seed": "node scripts/seed-meilisearch.mjs",
     "health": "node scripts/check-platform-health.mjs",

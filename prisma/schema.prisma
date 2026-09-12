@@ -46,8 +46,8 @@ enum PaymentStatus {
 // admin's approval atomically moves the row into before calling Razorpay
 // (see approveRefundAction) — it exists specifically so two concurrent
 // approve clicks can't both pass a REQUESTED check and both issue a real
-// refund; it's the only state a stuck/failed refund call can be left in for
-// manual follow-up.
+// refund. Provider timeouts keep it in PROCESSING with an explicit
+// reconciliation flag; clear provider failures return it to REQUESTED.
 enum RefundStatus {
   NONE
   REQUESTED
@@ -171,8 +171,8 @@ model Order {
   discount          Decimal       @default(0) @db.Decimal(10, 2)
   amount            Decimal       @db.Decimal(10, 2)
   paymentStatus     PaymentStatus @default(PENDING)
-  razorpayOrderId   String?
-  razorpayPaymentId String?
+  razorpayOrderId   String?        @unique
+  razorpayPaymentId String?        @unique
   razorpaySignature String?
   porterOrderId     String?
   porterStatus      String?
@@ -189,7 +189,10 @@ model Order {
   refundReason      String?
   refundAdminNote   String?
   refundAmount      Decimal?      @db.Decimal(10, 2)
-  razorpayRefundId  String?
+  razorpayRefundId  String?        @unique
+  refundAttemptedAt DateTime?
+  refundFailureReason String?
+  refundReconciliationRequired Boolean @default(false)
   refundRequestedAt DateTime?
   refundProcessedAt DateTime?
   // True while this order is currently holding a stock reservation (decremented
@@ -207,6 +210,7 @@ model Order {
   @@index([status])
   @@index([customerPhone])
   @@index([razorpayOrderId])
+  @@index([refundStatus, refundReconciliationRequired])
 }
 
 model OrderItem {
@@ -245,6 +249,17 @@ model OrderEvent {
   message   String
   createdAt DateTime @default(now())
   order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+}
+
+model WebhookEvent {
+  id          String   @id @default(cuid())
+  provider    String
+  eventId     String
+  eventType   String
+  payloadHash String?
+  processedAt DateTime @default(now())
+
+  @@unique([provider, eventId])
 }
 
 model Notification {

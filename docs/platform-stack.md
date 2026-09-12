@@ -7,6 +7,13 @@
   Twilio via `CUSTOMER_SMS_PROVIDER=twilio`. Use `TWILIO_API_KEY_SID`,
   `TWILIO_API_KEY_SECRET`, `TWILIO_ACCOUNT_SID`, and `TWILIO_FROM_NUMBER`
   (or use `TWILIO_AUTH_TOKEN` instead of the API-key pair).
+- **Payment/refund state**: Payment confirmation is limited to
+  `PENDING + stockReserved`; release claims the same reservation exclusively.
+  Refund approval claims `REQUESTED -> PROCESSING` before calling Razorpay.
+  Clear failures return to `REQUESTED`; uncertain provider outcomes remain
+  `PROCESSING` with reconciliation required. Razorpay webhook events are
+  deduplicated in `WebhookEvent`, and `pnpm reconcile:payments` reports stuck
+  refunds without changing state.
 # Bike Parts Marketplace Platform Stack
 
 ## Implemented in this pass

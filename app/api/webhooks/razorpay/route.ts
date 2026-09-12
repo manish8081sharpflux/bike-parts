@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 import { verifyRazorpayWebhookSignature } from "@/lib/razorpay";
 import { confirmOrderPayment } from "@/lib/order-payment-state";
+import {
+  markProviderRefundCreated,
+  markRefundFailed,
+  markRefundSucceeded,
+} from "@/lib/order-refund-state";
+import { claimWebhookEvent, deterministicWebhookEventId } from "@/lib/webhook-events";
 import { prisma } from "@/lib/db";
 
 /**
@@ -31,14 +37,33 @@ export async function POST(request: Request) {
   }
 
   const payload = JSON.parse(rawBody) as {
+    id?: string;
     event: string;
-    payload?: { payment?: { entity?: { order_id?: string; id?: string } } };
+    payload?: {
+      payment?: { entity?: { order_id?: string; id?: string } };
+      refund?: { entity?: { id?: string; payment_id?: string } };
+    };
   };
 
+  const paymentEntity = payload.payload?.payment?.entity;
+  const refundEntity = payload.payload?.refund?.entity;
+  const providerEventId = payload.id ?? deterministicWebhookEventId(
+    {
+      event: payload.event,
+      paymentId: paymentEntity?.id,
+      refundId: refundEntity?.id,
+      orderId: paymentEntity?.order_id,
+      paymentReference: refundEntity?.payment_id,
+    },
+    rawBody
+  );
+  if (!(await claimWebhookEvent({ provider: "razorpay", eventId: providerEventId, eventType: payload.event, rawBody }))) {
+    return NextResponse.json({ received: true, duplicate: true });
+  }
+
   if (payload.event === "payment.captured") {
-    const entity = payload.payload?.payment?.entity;
-    const razorpayOrderId = entity?.order_id;
-    const razorpayPaymentId = entity?.id;
+    const razorpayOrderId = paymentEntity?.order_id;
+    const razorpayPaymentId = paymentEntity?.id;
 
     if (razorpayOrderId) {
       const order = await prisma.order.findFirst({ where: { razorpayOrderId } });
@@ -50,6 +75,21 @@ export async function POST(request: Request) {
           source: "webhook",
         });
       }
+    }
+  }
+
+  if (["refund.created", "refund.processed", "refund.failed"].includes(payload.event)) {
+    const refundId = refundEntity?.id;
+    const paymentId = refundEntity?.payment_id;
+    const order = refundId
+      ? await prisma.order.findFirst({ where: { razorpayRefundId: refundId } })
+      : paymentId
+      ? await prisma.order.findFirst({ where: { razorpayPaymentId: paymentId, refundStatus: "PROCESSING" } })
+      : null;
+    if (order && refundId) {
+      if (payload.event === "refund.created") await markProviderRefundCreated(order.id, refundId);
+      if (payload.event === "refund.processed") await markRefundSucceeded(order.id, refundId);
+      if (payload.event === "refund.failed") await markRefundFailed(order.id, "Razorpay reported that the refund failed.");
     }
   }
 
