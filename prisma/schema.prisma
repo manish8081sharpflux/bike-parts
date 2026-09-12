@@ -1,0 +1,258 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ListingCondition {
+  NEW
+  USED
+  REFURBISHED
+}
+
+enum ListingStatus {
+  DRAFT
+  ACTIVE
+  RESERVED
+  SOLD
+  ARCHIVED
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  PACKED
+  SHIPPED
+  OUT_FOR_DELIVERY
+  DELIVERED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+// Tracks a customer-initiated refund request end to end, independent of the
+// order's own fulfillment status — a delivered order can still have a
+// refund requested against it. NONE (the default) means no refund has ever
+// been requested; REJECTED can be requested again (the customer-facing form
+// stays open in that state). PROCESSING is a brief transitional claim an
+// admin's approval atomically moves the row into before calling Razorpay
+// (see approveRefundAction) — it exists specifically so two concurrent
+// approve clicks can't both pass a REQUESTED check and both issue a real
+// refund; it's the only state a stuck/failed refund call can be left in for
+// manual follow-up.
+enum RefundStatus {
+  NONE
+  REQUESTED
+  PROCESSING
+  REJECTED
+  REFUNDED
+}
+
+enum NotificationChannel {
+  EMAIL
+  PUSH
+  WHATSAPP
+}
+
+model User {
+  id           String         @id @default(cuid())
+  email        String?        @unique
+  phone        String?        @unique
+  name         String?
+  // true for customers created directly from the admin Customers page; false
+  // (default) for the normal path — a User row upserted by phone the first
+  // time someone checks out / logs in on the storefront.
+  addedByAdmin Boolean        @default(false)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  seller       SellerProfile?
+  orders       Order[]
+}
+
+model SellerProfile {
+  id        String            @id @default(cuid())
+  userId    String            @unique
+  shopName  String
+  city      String
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  listings  BikePartListing[]
+}
+
+model BikePartListing {
+  id               String           @id @default(cuid())
+  sellerId         String?
+  name             String
+  slug             String           @unique
+  brand            String
+  category         String
+  condition        ListingCondition @default(NEW)
+  description      String           @default("")
+  price            Decimal          @db.Decimal(10, 2)
+  gstRate          Decimal          @default(18) @db.Decimal(5, 2)
+  stock            Int              @default(0)
+  city             String?
+  imageUrl         String?
+  images           String[]         @default([])
+  // Product-detail-page fields — everything the customer-facing product
+  // page shows beyond the core listing info above.
+  sku              String?
+  oemPartNumber    String?
+  productType      String?
+  specifications   Json             @default("[]")
+  compatibleVehicles Json           @default("[]")
+  searchTags       String[]         @default([])
+  features         String[]         @default([])
+  packageContents  String[]         @default([])
+  material         String?
+  finish           String?
+  packIncludes     String?
+  weightKg         Decimal?         @db.Decimal(6, 3)
+  warrantyMonths   Int?
+  countryOfOrigin  String?
+  rating           Decimal?         @db.Decimal(2, 1)
+  deliveryDaysMin  Int?
+  deliveryDaysMax  Int?
+  offerLabel       String?
+  compatibleModels String[]         @default([])
+  status           ListingStatus    @default(ACTIVE)
+  searchSynced     Boolean          @default(false)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  seller           SellerProfile?   @relation(fields: [sellerId], references: [id], onDelete: SetNull)
+  orderItems       OrderItem[]
+
+  @@index([category])
+  @@index([brand])
+  @@index([status])
+}
+
+model Order {
+  id                String        @id @default(cuid())
+  buyerId           String?
+  customerName      String
+  customerPhone     String
+  status            OrderStatus   @default(PENDING)
+  itemsTotal        Decimal       @db.Decimal(10, 2)
+  taxAmount         Decimal       @default(0) @db.Decimal(10, 2)
+  deliveryCharge    Decimal       @default(0) @db.Decimal(10, 2)
+  discount          Decimal       @default(0) @db.Decimal(10, 2)
+  amount            Decimal       @db.Decimal(10, 2)
+  paymentStatus     PaymentStatus @default(PENDING)
+  razorpayOrderId   String?
+  razorpayPaymentId String?
+  razorpaySignature String?
+  porterOrderId     String?
+  porterStatus      String?
+  porterTrackingUrl String?
+  deliveryAddress   Json
+  bikeLabel         String?
+  adminNote         String?
+  // Refund request lifecycle — see RefundStatus. `refundAmount` is set once a
+  // request is made (defaults to the full order amount; always a full refund
+  // in this app today, no partial-refund UI yet) and stays fixed through to
+  // REFUNDED so the amount actually sent to Razorpay is always what's shown,
+  // even if the order's own `amount` were ever edited afterward.
+  refundStatus      RefundStatus  @default(NONE)
+  refundReason      String?
+  refundAdminNote   String?
+  refundAmount      Decimal?      @db.Decimal(10, 2)
+  razorpayRefundId  String?
+  refundRequestedAt DateTime?
+  refundProcessedAt DateTime?
+  // True while this order is currently holding a stock reservation (decremented
+  // from ProductStock at checkout, not yet released back). Flipped back to
+  // false once the reservation is released — payment failed/expired, or the
+  // Razorpay order could never be created — so it's never released twice.
+  // Left true forever once a sale completes (the stock was genuinely consumed).
+  stockReserved     Boolean       @default(false)
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  buyer             User?         @relation(fields: [buyerId], references: [id])
+  items             OrderItem[]
+  events            OrderEvent[]
+
+  @@index([status])
+  @@index([customerPhone])
+  @@index([razorpayOrderId])
+}
+
+model OrderItem {
+  id                String           @id @default(cuid())
+  orderId           String
+  listingId         String?
+  // Id of the matching entry in the storefront's static catalog (see
+  // lib/storefront-stock.ts) — separate from `listingId`, which points at an
+  // admin-managed BikePartListing row instead. Used to release/track stock
+  // reservations for this line item; null for anything that doesn't match a
+  // known catalog id (defensive — checkout should always set it today).
+  catalogProductId  String?
+  productName       String
+  productImage      String?
+  quantity          Int
+  unitPrice         Decimal          @db.Decimal(10, 2)
+  order             Order            @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  listing           BikePartListing? @relation(fields: [listingId], references: [id], onDelete: SetNull)
+}
+
+// Live remaining stock for the storefront's static product catalog (see
+// lib/storefront-stock.ts for the canonical list of ids/names this tracks).
+// Separate from BikePartListing.stock, which is the admin-managed catalog's
+// own stock — the two product catalogs are not the same data today.
+model ProductStock {
+  id        String   @id
+  name      String
+  stock     Int      @default(0)
+  updatedAt DateTime @updatedAt
+}
+
+model OrderEvent {
+  id        String   @id @default(cuid())
+  orderId   String
+  type      String
+  message   String
+  createdAt DateTime @default(now())
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+}
+
+model Notification {
+  id        String              @id @default(cuid())
+  userId    String?
+  channel   NotificationChannel
+  recipient String
+  subject   String?
+  body      String
+  sentAt    DateTime?
+  error     String?
+  createdAt DateTime            @default(now())
+}
+
+model JobEvent {
+  id        String   @id @default(cuid())
+  queue     String
+  jobName   String
+  payload   Json
+  status    String
+  createdAt DateTime @default(now())
+}
+
+// Single-row table (id is always "singleton") holding store-wide settings
+// editable from the admin Settings page.
+model StoreSettings {
+  id           String   @id @default("singleton")
+  storeName    String   @default("Deep Automobiles")
+  supportEmail String?
+  supportPhone String?
+  addressLine  String?
+  gstNumber    String?
+  updatedAt    DateTime @updatedAt
+}
