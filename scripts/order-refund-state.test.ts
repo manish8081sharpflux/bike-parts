@@ -9,7 +9,7 @@ import {
   markRefundSucceeded,
   requestRefund,
 } from "@/lib/order-refund-state";
-import { claimWebhookEvent } from "@/lib/webhook-events";
+import { claimWebhookEvent, markWebhookProcessed } from "@/lib/webhook-events";
 
 const suffix = `${Date.now()}-${process.pid}`;
 const orderIds: string[] = [];
@@ -89,8 +89,11 @@ test("duplicate webhook event claims are idempotent", async () => {
   const eventId = `webhook_${suffix}`;
   const first = await claimWebhookEvent({ provider: "razorpay", eventId, eventType: "refund.processed", rawBody: "{}" });
   const second = await claimWebhookEvent({ provider: "razorpay", eventId, eventType: "refund.processed", rawBody: "{}" });
-  assert.equal(first, true);
-  assert.equal(second, false);
+  assert.equal(first.status, "claimed");
+  if (first.status === "claimed") await markWebhookProcessed(first.id, first.attempts);
+  const processedDuplicate = await claimWebhookEvent({ provider: "razorpay", eventId, eventType: "refund.processed", rawBody: "{}" });
+  assert.equal(second.status, "in_progress");
+  assert.equal(processedDuplicate.status, "already_processed");
   webhookIds.push(eventId);
 });
 

@@ -56,6 +56,12 @@ enum RefundStatus {
   REFUNDED
 }
 
+enum WebhookProcessingStatus {
+  PROCESSING
+  PROCESSED
+  FAILED
+}
+
 enum NotificationChannel {
   EMAIL
   PUSH
@@ -252,14 +258,21 @@ model OrderEvent {
 }
 
 model WebhookEvent {
-  id          String   @id @default(cuid())
-  provider    String
-  eventId     String
-  eventType   String
-  payloadHash String?
-  processedAt DateTime @default(now())
+  id                   String                 @id @default(cuid())
+  provider             String
+  eventId              String
+  eventType            String
+  payloadHash          String?
+  status               WebhookProcessingStatus @default(PROCESSING)
+  attempts             Int                    @default(1)
+  lastError            String?
+  processingStartedAt  DateTime?
+  processedAt          DateTime?
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
 
   @@unique([provider, eventId])
+  @@index([status, processingStartedAt])
 }
 
 model Notification {
