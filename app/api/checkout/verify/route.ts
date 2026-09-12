@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { verifyRazorpayPaymentSignature } from "@/lib/razorpay";
-import { releaseOrderStock } from "@/lib/checkout-stock";
 import { getCustomerSession } from "@/lib/auth/customer-session";
+import { confirmOrderPayment } from "@/lib/order-payment-state";
 
 type VerifyBody = {
   orderId: string;
@@ -32,10 +32,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Order not found." }, { status: 404 });
   }
 
-  if (order.paymentStatus === "PAID") {
-    return NextResponse.json({ success: true, orderId: order.id });
-  }
-
   let valid = false;
   try {
     valid = verifyRazorpayPaymentSignature({
@@ -49,50 +45,26 @@ export async function POST(request: Request) {
   }
 
   if (!valid) {
-    // Also move `status` to CANCELLED, not just `paymentStatus` to FAILED —
-    // leaving `status` at its prior value (still PENDING for a first
-    // attempt) made this order look like it was still "being prepared" to
-    // the customer (see mapDbOrderStatus in app/home-client.tsx, which
-    // treats anything short of OUT_FOR_DELIVERY/DELIVERED/CANCELLED as
-    // "processing") and kept it counted as active/pending on the admin
-    // dashboard, even though payment definitively never went through.
-    await prisma.order.update({
-      where: { id: order.id },
-      data: { paymentStatus: "FAILED", status: "CANCELLED" },
-    });
-    // Signature didn't check out, so this payment can't be trusted as
-    // successful — release the reserved stock rather than leaving it stuck
-    // against a payment that isn't going to complete.
-    await releaseOrderStock(order.id).catch(() => {});
-    await prisma.orderEvent
-      .create({
-        data: {
-          orderId: order.id,
-          type: "PAYMENT_FAILED",
-          message: "Payment signature verification failed — order cancelled and stock released.",
-        },
-      })
-      .catch(() => {});
+    await prisma.orderEvent.create({
+      data: {
+        orderId: order.id,
+        type: "PAYMENT_VERIFICATION_FAILED",
+        message: "Client payment signature verification failed; order remains active for webhook or cancellation reconciliation.",
+      },
+    }).catch(() => {});
     return NextResponse.json({ error: "Payment signature verification failed." }, { status: 400 });
   }
 
-  await prisma.order.update({
-    where: { id: order.id },
-    data: {
-      paymentStatus: "PAID",
-      status: "PAID",
-      razorpayPaymentId: razorpay_payment_id,
-      razorpaySignature: razorpay_signature,
-    },
+  const payment = await confirmOrderPayment({
+    orderId: order.id,
+    buyerId: session.user.id,
+    razorpayOrderId: razorpay_order_id,
+    razorpayPaymentId: razorpay_payment_id,
+    razorpaySignature: razorpay_signature,
+    source: "verify",
   });
-
-  await prisma.orderEvent.create({
-    data: {
-      orderId: order.id,
-      type: "PAYMENT_CONFIRMED",
-      message: `Payment captured (${razorpay_payment_id})`,
-    },
-  });
-
-  return NextResponse.json({ success: true, orderId: order.id });
+  if (payment === "not_payable") {
+    return NextResponse.json({ error: "This checkout is no longer active." }, { status: 409 });
+  }
+  return NextResponse.json({ success: true, orderId: order.id, alreadyPaid: payment === "already_paid" });
 }

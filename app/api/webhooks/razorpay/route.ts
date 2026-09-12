@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
 import { verifyRazorpayWebhookSignature } from "@/lib/razorpay";
+import { confirmOrderPayment } from "@/lib/order-payment-state";
+import { prisma } from "@/lib/db";
 
 /**
  * Razorpay webhook — a safety net in case the client-side verify call in
@@ -41,23 +42,12 @@ export async function POST(request: Request) {
 
     if (razorpayOrderId) {
       const order = await prisma.order.findFirst({ where: { razorpayOrderId } });
-
-      if (order && order.paymentStatus !== "PAID") {
-        await prisma.order.update({
-          where: { id: order.id },
-          data: {
-            paymentStatus: "PAID",
-            status: "PAID",
-            razorpayPaymentId: razorpayPaymentId ?? order.razorpayPaymentId,
-          },
-        });
-
-        await prisma.orderEvent.create({
-          data: {
-            orderId: order.id,
-            type: "PAYMENT_CONFIRMED",
-            message: `Payment captured via webhook (${razorpayPaymentId ?? "unknown"})`,
-          },
+      if (order) {
+        await confirmOrderPayment({
+          orderId: order.id,
+          razorpayOrderId,
+          razorpayPaymentId,
+          source: "webhook",
         });
       }
     }

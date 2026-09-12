@@ -9,7 +9,8 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test:customer-auth": "node --test scripts/customer-auth.test.mjs",
-    "test:checkout-inventory": "node --test scripts/checkout-inventory.test.mjs",
+    "test:checkout-inventory": "tsx --test scripts/checkout-inventory.test.ts",
+    "test:checkout-payment-race": "tsx --test scripts/checkout-payment-race.test.ts",
     "meilisearch:up": "node scripts/start-meilisearch.mjs",
     "meilisearch:seed": "node scripts/seed-meilisearch.mjs",
     "health": "node scripts/check-platform-health.mjs",
@@ -53,6 +54,7 @@
     "eslint-config-next": "16.3.4",
     "prisma": "6.19.3",
     "tailwindcss": "^4",
+    "tsx": "^4.23.13",
     "typescript": "^5"
   }
 }

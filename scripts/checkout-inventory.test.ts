@@ -1,14 +1,20 @@
 import assert from "node:assert/strict";
 import test, { after } from "node:test";
-import { PrismaClient } from "@prisma/client";
+import { Prisma } from "@prisma/client";
+import { prisma } from "@/lib/db";
+import {
+  OutOfStockError,
+  releaseOrderAndRecordEvent,
+  releaseOrderStock,
+  reserveStock,
+} from "@/lib/checkout-stock";
 
-const prisma = new PrismaClient();
 const suffix = `${Date.now()}-${process.pid}`;
-const listingIds = [];
-const orderIds = [];
-const userIds = [];
+const listingIds: string[] = [];
+const orderIds: string[] = [];
+const userIds: string[] = [];
 
-async function listing(name, stock) {
+async function listing(name: string, stock: number) {
   const item = await prisma.bikePartListing.create({
     data: {
       name,
@@ -23,15 +29,7 @@ async function listing(name, stock) {
   return item;
 }
 
-async function reserve(tx, id, quantity) {
-  return tx.$executeRaw`
-    UPDATE "BikePartListing"
-    SET stock = stock - ${quantity}, "updatedAt" = now()
-    WHERE id = ${id} AND stock >= ${quantity}
-  `;
-}
-
-async function createOrder(tx, userId, phone, lines) {
+async function createOrder(tx: Prisma.TransactionClient, userId: string, phone: string, listingId: string, quantity: number) {
   const order = await tx.order.create({
     data: {
       buyerId: userId,
@@ -41,42 +39,45 @@ async function createOrder(tx, userId, phone, lines) {
       itemsTotal: 100,
       amount: 100,
       stockReserved: true,
-      items: { create: lines.map(({ id, quantity }) => ({ listingId: id, productName: "Test", quantity, unitPrice: 100 })) },
+      items: { create: [{ listingId, productName: "Test", quantity, unitPrice: 100 }] },
     },
   });
   orderIds.push(order.id);
   return order;
 }
 
+async function testUser() {
+  const phone = `8${String(Date.now()).slice(-8)}${userIds.length % 10}`;
+  const user = await prisma.user.create({ data: { phone } });
+  userIds.push(user.id);
+  return user;
+}
+
 test("order failure rolls back the stock reservation", async () => {
   const item = await listing("Rollback", 10);
-  const before = await prisma.order.count();
   await assert.rejects(prisma.$transaction(async (tx) => {
-    assert.equal(await reserve(tx, item.id, 3), 1);
+    await reserveStock(tx, [{ id: item.id, quantity: 3 }]);
     throw new Error("forced order.create failure");
   }));
   assert.equal((await prisma.bikePartListing.findUniqueOrThrow({ where: { id: item.id } })).stock, 10);
-  assert.equal(await prisma.order.count(), before);
 });
 
 test("multi-item reservation is all-or-nothing", async () => {
   const first = await listing("Multi A", 5);
   const second = await listing("Multi B", 0);
   await assert.rejects(prisma.$transaction(async (tx) => {
-    assert.equal(await reserve(tx, first.id, 2), 1);
-    if ((await reserve(tx, second.id, 1)) === 0) throw new Error("out of stock");
-  }));
+    await reserveStock(tx, [{ id: first.id, quantity: 2 }, { id: second.id, quantity: 1 }]);
+  }), OutOfStockError);
   assert.equal((await prisma.bikePartListing.findUniqueOrThrow({ where: { id: first.id } })).stock, 5);
   assert.equal((await prisma.bikePartListing.findUniqueOrThrow({ where: { id: second.id } })).stock, 0);
 });
 
 test("successful reservation creates an order and keeps stockReserved", async () => {
   const item = await listing("Successful", 5);
-  const user = await prisma.user.create({ data: { phone: `900${suffix.slice(-7)}` } });
-  userIds.push(user.id);
+  const user = await testUser();
   const order = await prisma.$transaction(async (tx) => {
-    assert.equal(await reserve(tx, item.id, 2), 1);
-    return createOrder(tx, user.id, user.phone, [{ id: item.id, quantity: 2 }]);
+    await reserveStock(tx, [{ id: item.id, quantity: 2 }]);
+    return createOrder(tx, user.id, user.phone!, item.id, 2);
   });
   assert.equal((await prisma.bikePartListing.findUniqueOrThrow({ where: { id: item.id } })).stock, 3);
   assert.equal((await prisma.order.findUniqueOrThrow({ where: { id: order.id } })).stockReserved, true);
@@ -84,19 +85,12 @@ test("successful reservation creates an order and keeps stockReserved", async ()
 
 test("Razorpay failure compensation restores stock and records cancellation", async () => {
   const item = await listing("Compensation", 5);
-  const user = await prisma.user.create({ data: { phone: `901${suffix.slice(-7)}` } });
-  userIds.push(user.id);
+  const user = await testUser();
   const order = await prisma.$transaction(async (tx) => {
-    assert.equal(await reserve(tx, item.id, 2), 1);
-    return createOrder(tx, user.id, user.phone, [{ id: item.id, quantity: 2 }]);
+    await reserveStock(tx, [{ id: item.id, quantity: 2 }]);
+    return createOrder(tx, user.id, user.phone!, item.id, 2);
   });
-  await prisma.$transaction(async (tx) => {
-    const claimed = await tx.order.updateMany({ where: { id: order.id, stockReserved: true }, data: { stockReserved: false, status: "CANCELLED" } });
-    if (claimed.count === 1) {
-      await tx.$executeRaw`UPDATE "BikePartListing" SET stock = stock + 2, "updatedAt" = now() WHERE id = ${item.id}`;
-      await tx.orderEvent.create({ data: { orderId: order.id, type: "PAYMENT_FAILED", message: "test compensation" } });
-    }
-  });
+  assert.equal(await releaseOrderAndRecordEvent(order.id, "PAYMENT_FAILED", "test compensation"), true);
   const restored = await prisma.bikePartListing.findUniqueOrThrow({ where: { id: item.id } });
   const cancelled = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
   assert.equal(restored.stock, 5);
@@ -106,22 +100,21 @@ test("Razorpay failure compensation restores stock and records cancellation", as
 
 test("concurrent releases restore stock exactly once", async () => {
   const item = await listing("Double Release", 3);
-  const user = await prisma.user.create({ data: { phone: `902${suffix.slice(-7)}` } });
-  userIds.push(user.id);
+  const user = await testUser();
   const order = await prisma.$transaction(async (tx) => {
-    assert.equal(await reserve(tx, item.id, 2), 1);
-    return createOrder(tx, user.id, user.phone, [{ id: item.id, quantity: 2 }]);
+    await reserveStock(tx, [{ id: item.id, quantity: 2 }]);
+    return createOrder(tx, user.id, user.phone!, item.id, 2);
   });
-  await Promise.all([1, 2].map(() => prisma.$transaction(async (tx) => {
-    const claimed = await tx.order.updateMany({ where: { id: order.id, stockReserved: true }, data: { stockReserved: false } });
-    if (claimed.count === 1) await tx.$executeRaw`UPDATE "BikePartListing" SET stock = stock + 2, "updatedAt" = now() WHERE id = ${item.id}`;
-  })));
+  await Promise.all([releaseOrderStock(order.id), releaseOrderStock(order.id)]);
   assert.equal((await prisma.bikePartListing.findUniqueOrThrow({ where: { id: item.id } })).stock, 3);
 });
 
 test("concurrent last-unit reservations allow one winner", async () => {
   const item = await listing("Last Unit", 1);
-  const results = await Promise.all([1, 2].map(() => prisma.$transaction((tx) => reserve(tx, item.id, 1))));
+  const results = await Promise.all([
+    prisma.$transaction((tx) => reserveStock(tx, [{ id: item.id, quantity: 1 }])).then(() => 1).catch(() => 0),
+    prisma.$transaction((tx) => reserveStock(tx, [{ id: item.id, quantity: 1 }])).then(() => 1).catch(() => 0),
+  ]);
   assert.deepEqual(results.sort(), [0, 1]);
   assert.equal((await prisma.bikePartListing.findUniqueOrThrow({ where: { id: item.id } })).stock, 0);
 });

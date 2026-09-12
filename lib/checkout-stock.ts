@@ -79,7 +79,7 @@ export async function reserveStock(
  */
 async function releaseOrderStockInTransaction(tx: Prisma.TransactionClient, orderId: string) {
   const claimed = await tx.order.updateMany({
-    where: { id: orderId, stockReserved: true, paymentStatus: { not: "PAID" } },
+    where: { id: orderId, stockReserved: true, paymentStatus: "PENDING" },
     data: { stockReserved: false },
   });
   if (claimed.count !== 1) return false;
@@ -136,7 +136,7 @@ export async function releaseExpiredReservations() {
   const stale = await prisma.order.findMany({
     where: {
       stockReserved: true,
-      paymentStatus: { not: "PAID" },
+      paymentStatus: "PENDING",
       createdAt: { lt: cutoff },
     },
     select: { id: true },
