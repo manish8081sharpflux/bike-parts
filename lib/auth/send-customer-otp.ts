@@ -1,9 +1,11 @@
 function getTwilioConfig() {
   const accountSid = process.env.TWILIO_ACCOUNT_SID;
+  const apiKeySid = process.env.TWILIO_API_KEY_SID;
+  const apiKeySecret = process.env.TWILIO_API_KEY_SECRET;
   const authToken = process.env.TWILIO_AUTH_TOKEN;
   const from = process.env.TWILIO_FROM_NUMBER;
-  if (!accountSid || !authToken || !from) return null;
-  return { accountSid, authToken, from };
+  if (!accountSid || !from || (!authToken && !(apiKeySid && apiKeySecret))) return null;
+  return { accountSid, apiKeySid, apiKeySecret, authToken, from };
 }
 
 /** Sends an OTP through the configured provider. This module owns provider details. */
@@ -21,7 +23,9 @@ export async function sendCustomerOtpSms(phone: string, otp: string): Promise<vo
     {
       method: "POST",
       headers: {
-        Authorization: `Basic ${Buffer.from(`${config.accountSid}:${config.authToken}`).toString("base64")}`,
+        Authorization: `Basic ${Buffer.from(
+          `${config.apiKeySid ?? config.accountSid}:${config.apiKeySecret ?? config.authToken}`
+        ).toString("base64")}`,
         "Content-Type": "application/x-www-form-urlencoded",
       },
       body: new URLSearchParams({

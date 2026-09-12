@@ -1,3 +1,4 @@
+import { Prisma, PrismaClient } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { legacyStorefrontCatalog } from "@/lib/storefront-catalog";
 
@@ -7,6 +8,7 @@ const LEGACY_CATALOG_BY_ID = new Map(legacyStorefrontCatalog.map((product) => [p
 
 /** How long an order can hold a stock reservation without completing payment before it's released back. */
 const RESERVATION_TTL_MS = 15 * 60 * 1000;
+type DbClient = PrismaClient | Prisma.TransactionClient;
 
 export type StockShortage = {
   id: string;
@@ -26,7 +28,7 @@ export class OutOfStockError extends Error {
 }
 
 /**
- * Atomically checks and decrements stock for every line item in one
+ * Atomically checks and decrements stock for every line item in the caller's
  * transaction — all-or-nothing. Each decrement is itself a single
  * conditional SQL UPDATE (`WHERE stock >= quantity`), so two concurrent
  * requests racing for the same last unit can never both succeed: only one
@@ -37,32 +39,31 @@ export class OutOfStockError extends Error {
  * `items[].id` is a `BikePartListing` id (the storefront now reads that
  * table — see lib/storefront-catalog.ts's getStorefrontProducts).
  */
-export async function reserveStock(items: Array<{ id: string; quantity: number }>) {
-  await prisma.$transaction(async (tx) => {
-    const shortages: StockShortage[] = [];
+export async function reserveStock(
+  db: DbClient,
+  items: Array<{ id: string; quantity: number }>
+) {
+  const shortages: StockShortage[] = [];
 
-    for (const item of items) {
-      const affected = await tx.$executeRaw`
-        UPDATE "BikePartListing"
-        SET stock = stock - ${item.quantity}, "updatedAt" = now()
-        WHERE id = ${item.id} AND stock >= ${item.quantity}
-      `;
+  for (const item of items) {
+    const affected = await db.$executeRaw`
+      UPDATE "BikePartListing"
+      SET stock = stock - ${item.quantity}, "updatedAt" = now()
+      WHERE id = ${item.id} AND stock >= ${item.quantity}
+    `;
 
-      if (affected === 0) {
-        const current = await tx.bikePartListing.findUnique({ where: { id: item.id } });
-        shortages.push({
-          id: item.id,
-          name: current?.name ?? LEGACY_CATALOG_BY_ID.get(item.id)?.name ?? item.id,
-          requested: item.quantity,
-          available: current?.stock ?? 0,
-        });
-      }
+    if (affected === 0) {
+      const current = await db.bikePartListing.findUnique({ where: { id: item.id } });
+      shortages.push({
+        id: item.id,
+        name: current?.name ?? LEGACY_CATALOG_BY_ID.get(item.id)?.name ?? item.id,
+        requested: item.quantity,
+        available: current?.stock ?? 0,
+      });
     }
+  }
 
-    if (shortages.length > 0) {
-      throw new OutOfStockError(shortages);
-    }
-  });
+  if (shortages.length > 0) throw new OutOfStockError(shortages);
 }
 
 /**
@@ -76,31 +77,50 @@ export async function reserveStock(items: Array<{ id: string; quantity: number }
  * reading that table) or, for any order that reserved stock before that and
  * is still mid-checkout, the legacy `catalogProductId` (`ProductStock`).
  */
-export async function releaseOrderStock(orderId: string) {
-  await prisma.$transaction(async (tx) => {
-    const order = await tx.order.findUnique({
-      where: { id: orderId },
-      include: { items: true },
-    });
-    if (!order || !order.stockReserved) return;
+async function releaseOrderStockInTransaction(tx: Prisma.TransactionClient, orderId: string) {
+  const claimed = await tx.order.updateMany({
+    where: { id: orderId, stockReserved: true, paymentStatus: { not: "PAID" } },
+    data: { stockReserved: false },
+  });
+  if (claimed.count !== 1) return false;
 
-    for (const item of order.items) {
-      if (item.listingId) {
-        await tx.$executeRaw`
-          UPDATE "BikePartListing"
-          SET stock = stock + ${item.quantity}, "updatedAt" = now()
-          WHERE id = ${item.listingId}
-        `;
-      } else if (item.catalogProductId) {
-        await tx.$executeRaw`
-          UPDATE "ProductStock"
-          SET stock = stock + ${item.quantity}, "updatedAt" = now()
-          WHERE id = ${item.catalogProductId}
-        `;
-      }
+  const items = await tx.orderItem.findMany({ where: { orderId } });
+  for (const item of items) {
+    if (item.listingId) {
+      await tx.$executeRaw`
+        UPDATE "BikePartListing"
+        SET stock = stock + ${item.quantity}, "updatedAt" = now()
+        WHERE id = ${item.listingId}
+      `;
+    } else if (item.catalogProductId) {
+      await tx.$executeRaw`
+        UPDATE "ProductStock"
+        SET stock = stock + ${item.quantity}, "updatedAt" = now()
+        WHERE id = ${item.catalogProductId}
+      `;
     }
+  }
+  return true;
+}
 
-    await tx.order.update({ where: { id: order.id }, data: { stockReserved: false } });
+export async function releaseOrderStock(orderId: string, db: DbClient = prisma) {
+  if (db === prisma) {
+    return prisma.$transaction((tx) => releaseOrderStockInTransaction(tx, orderId));
+  }
+  return releaseOrderStockInTransaction(db, orderId);
+}
+
+export async function releaseOrderAndRecordEvent(
+  orderId: string,
+  eventType: string,
+  message: string
+) {
+  return prisma.$transaction(async (tx) => {
+    const released = await releaseOrderStockInTransaction(tx, orderId);
+    if (!released) return false;
+    await tx.order.update({ where: { id: orderId }, data: { status: "CANCELLED" } });
+    await tx.orderEvent.create({ data: { orderId, type: eventType, message } });
+    return true;
   });
 }
 
@@ -124,18 +144,10 @@ export async function releaseExpiredReservations() {
   });
 
   for (const { id } of stale) {
-    await releaseOrderStock(id);
-    await prisma.order
-      .update({ where: { id }, data: { status: "CANCELLED" } })
-      .catch(() => {});
-    await prisma.orderEvent
-      .create({
-        data: {
-          orderId: id,
-          type: "STOCK_RELEASED",
-          message: "Stock reservation expired and was released — payment was never completed.",
-        },
-      })
-      .catch(() => {});
+    await releaseOrderAndRecordEvent(
+      id,
+      "STOCK_RELEASED",
+      "Stock reservation expired and was released — payment was never completed."
+    ).catch(() => {});
   }
 }

@@ -4,7 +4,9 @@
   `bikeparts_customer_session` cookie. Redis (`REDIS_URL`) provides shared
   phone/IP rate limits. Local E2E may set `CUSTOMER_OTP_DEV_MODE=true`; this
   must never be enabled in production. Production SMS currently supports
-  Twilio via `CUSTOMER_SMS_PROVIDER=twilio` and the `TWILIO_*` variables.
+  Twilio via `CUSTOMER_SMS_PROVIDER=twilio`. Use `TWILIO_API_KEY_SID`,
+  `TWILIO_API_KEY_SECRET`, `TWILIO_ACCOUNT_SID`, and `TWILIO_FROM_NUMBER`
+  (or use `TWILIO_AUTH_TOKEN` instead of the API-key pair).
 # Bike Parts Marketplace Platform Stack
 
 ## Implemented in this pass

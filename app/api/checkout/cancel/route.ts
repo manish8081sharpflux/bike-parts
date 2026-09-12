@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { releaseOrderStock } from "@/lib/checkout-stock";
+import { releaseOrderAndRecordEvent } from "@/lib/checkout-stock";
 import { getCustomerSession } from "@/lib/auth/customer-session";
 
 /**
@@ -35,19 +35,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true });
   }
 
-  await releaseOrderStock(order.id);
-  await prisma.order
-    .update({ where: { id: order.id }, data: { status: "CANCELLED" } })
-    .catch(() => {});
-  await prisma.orderEvent
-    .create({
-      data: {
-        orderId: order.id,
-        type: "STOCK_RELEASED",
-        message: "Checkout was cancelled before payment completed; stock reservation released.",
-      },
-    })
-    .catch(() => {});
+  await releaseOrderAndRecordEvent(
+    order.id,
+    "STOCK_RELEASED",
+    "Checkout was cancelled before payment completed; stock reservation released."
+  );
 
   return NextResponse.json({ ok: true });
 }

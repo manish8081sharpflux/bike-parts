@@ -4,7 +4,7 @@ import { createRazorpayOrder, isRazorpayConfigured } from "@/lib/razorpay";
 import {
   OutOfStockError,
   releaseExpiredReservations,
-  releaseOrderStock,
+  releaseOrderAndRecordEvent,
   reserveStock,
 } from "@/lib/checkout-stock";
 import { calculateCheckoutTotals } from "@/lib/checkout-amount";
@@ -113,12 +113,46 @@ export async function POST(request: Request) {
   const { itemsTotal, taxAmount, deliveryCharge, discount, amount } =
     calculateCheckoutTotals(resolvedItems);
 
-  // Reserve stock atomically before creating anything else. If two people
-  // hit checkout for the last unit of the same item at the same instant,
-  // only one of these succeeds — the other gets a clean 409 with exactly
-  // which item(s) ran out, before any order or payment is created.
+  // Reserve stock and create the order in one transaction. If either fails,
+  // PostgreSQL rolls back the reservation and all order/customer mutations.
+  let order;
   try {
-    await reserveStock(resolvedItems.map((item) => ({ id: item.id, quantity: item.quantity })));
+    order = await prisma.$transaction(async (tx) => {
+      await reserveStock(
+        tx,
+        resolvedItems.map((item) => ({ id: item.id, quantity: item.quantity }))
+      );
+
+      const user = session.user;
+      if (body.customerName !== user.name) {
+        await tx.user.update({ where: { id: user.id }, data: { name: body.customerName } });
+      }
+
+      return tx.order.create({
+        data: {
+          buyerId: user.id,
+          customerName: body.customerName,
+          customerPhone: user.phone!,
+          bikeLabel: body.bikeLabel,
+          deliveryAddress: body.deliveryAddress as object,
+          itemsTotal,
+          taxAmount,
+          deliveryCharge,
+          discount,
+          amount,
+          stockReserved: true,
+          items: {
+            create: resolvedItems.map((item) => ({
+              listingId: item.id,
+              productName: item.name,
+              productImage: item.image,
+              quantity: item.quantity,
+              unitPrice: item.price,
+            })),
+          },
+        },
+      });
+    });
   } catch (error) {
     if (error instanceof OutOfStockError) {
       return NextResponse.json(
@@ -135,37 +169,8 @@ export async function POST(request: Request) {
     throw error;
   }
 
-  const user = session.user;
-  if (body.customerName !== user.name) {
-    await prisma.user.update({ where: { id: user.id }, data: { name: body.customerName } });
-  }
-
-  const order = await prisma.order.create({
-    data: {
-      buyerId: user.id,
-      customerName: body.customerName,
-      customerPhone: user.phone!,
-      bikeLabel: body.bikeLabel,
-      deliveryAddress: body.deliveryAddress as object,
-      itemsTotal,
-      taxAmount,
-      deliveryCharge,
-      discount,
-      amount,
-      stockReserved: true,
-      items: {
-        create: resolvedItems.map((item) => ({
-          listingId: item.id,
-          productName: item.name,
-          productImage: item.image,
-          quantity: item.quantity,
-          unitPrice: item.price,
-        })),
-      },
-    },
-  });
-
   try {
+    const user = session.user;
     const razorpayOrder = await createRazorpayOrder({
       amountInPaise: Math.round(amount * 100),
       receipt: order.id,
@@ -188,9 +193,6 @@ export async function POST(request: Request) {
     // Razorpay order creation failed — this cart never got a chance to pay,
     // so give the stock back immediately rather than waiting for the expiry
     // sweep to notice.
-    await releaseOrderStock(order.id);
-    await prisma.order.update({ where: { id: order.id }, data: { status: "CANCELLED" } });
-
     // Always log the real error server-side. Only ever show the customer our
     // own deliberately-thrown config message (e.g. "Razorpay is not
     // configured...", useful during local setup) — the Razorpay SDK's own
@@ -205,16 +207,11 @@ export async function POST(request: Request) {
     // watching the server's terminal at that exact moment, so a failure like
     // this was otherwise undiagnosable after the fact.
     const rawMessage = error instanceof Error ? error.message : String(error);
-    await prisma.orderEvent
-      .create({
-        data: {
-          orderId: order.id,
-          type: "PAYMENT_FAILED",
-          message: `Razorpay order creation failed — ${rawMessage.slice(0, 500)}`,
-        },
-      })
-      .catch(() => {});
-
+    await releaseOrderAndRecordEvent(
+      order.id,
+      "PAYMENT_FAILED",
+      `Razorpay order creation failed — ${rawMessage.slice(0, 500)}; stock reservation was released.`
+    );
     const message =
       error instanceof Error && error.message.startsWith("Razorpay is not configured")
         ? error.message
