@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { getCustomerSession } from "@/lib/auth/customer-session";
 
 /**
  * Customer-initiated order cancellation. Same trust model as the refund
@@ -15,15 +16,11 @@ import { prisma } from "@/lib/db";
  */
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const body = await request.json().catch(() => null);
-  const phone = typeof body?.phone === "string" ? body.phone.trim() : "";
-
-  if (!phone) {
-    return NextResponse.json({ error: "phone is required." }, { status: 400 });
-  }
+  const session = await getCustomerSession();
+  if (!session) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
 
   const order = await prisma.order.findUnique({ where: { id } });
-  if (!order || order.customerPhone !== phone) {
+  if (!order || order.buyerId !== session.user.id) {
     return NextResponse.json({ error: "Order not found." }, { status: 404 });
   }
 

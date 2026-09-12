@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { verifyRazorpayPaymentSignature } from "@/lib/razorpay";
 import { releaseOrderStock } from "@/lib/checkout-stock";
+import { getCustomerSession } from "@/lib/auth/customer-session";
 
 type VerifyBody = {
   orderId: string;
@@ -11,6 +12,9 @@ type VerifyBody = {
 };
 
 export async function POST(request: Request) {
+  const session = await getCustomerSession();
+  if (!session) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+
   let body: VerifyBody;
   try {
     body = await request.json();
@@ -24,7 +28,7 @@ export async function POST(request: Request) {
   }
 
   const order = await prisma.order.findUnique({ where: { id: orderId } });
-  if (!order || order.razorpayOrderId !== razorpay_order_id) {
+  if (!order || order.buyerId !== session.user.id || order.razorpayOrderId !== razorpay_order_id) {
     return NextResponse.json({ error: "Order not found." }, { status: 404 });
   }
 

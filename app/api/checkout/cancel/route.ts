@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { releaseOrderStock } from "@/lib/checkout-stock";
+import { getCustomerSession } from "@/lib/auth/customer-session";
 
 /**
  * Called by the storefront when a checkout is abandoned before payment
@@ -10,6 +11,9 @@ import { releaseOrderStock } from "@/lib/checkout-stock";
  * expiry sweep would eventually notice (see lib/checkout-stock.ts).
  */
 export async function POST(request: Request) {
+  const session = await getCustomerSession();
+  if (!session) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+
   let body: { orderId?: string };
   try {
     body = await request.json();
@@ -22,6 +26,9 @@ export async function POST(request: Request) {
   }
 
   const order = await prisma.order.findUnique({ where: { id: body.orderId } });
+  if (order && order.buyerId !== session.user.id) {
+    return NextResponse.json({ error: "Order not found." }, { status: 404 });
+  }
   // Never touch an order that already succeeded — only release genuinely
   // abandoned ones. Also fine if the order doesn't exist (nothing to do).
   if (!order || order.paymentStatus === "PAID") {

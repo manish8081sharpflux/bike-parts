@@ -18,7 +18,6 @@ import type {
   RazorpayPaymentResponse,
 } from "./home/types";
 import {
-  AUTH_STORAGE_KEY,
   CART_STORAGE_KEY,
   RECENT_SEARCHES_STORAGE_KEY,
   MAX_RECENT_SEARCHES,
@@ -547,18 +546,21 @@ export function HomeClient({ products }: { products: Product[] }) {
   // every render starts logged-out, then this effect syncs in the real
   // state right after mount, client-side only.
   useEffect(() => {
-    try {
-      const savedPhone = localStorage.getItem(AUTH_STORAGE_KEY);
-      if (savedPhone) {
-        setIsAuthenticated(true);
-        setAuthPhone(savedPhone);
-        void refreshOrders(savedPhone);
-      }
-    } catch {
-      // localStorage unavailable (private browsing, blocked storage) — the
-      // customer just stays logged out and logs in again, same as before.
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    void fetch("/api/auth/session")
+      .then(async (response) => {
+        if (!response.ok) return null;
+        return (await response.json()) as {
+          authenticated: boolean;
+          user?: { phone?: string | null };
+        };
+      })
+      .then((session) => {
+        if (session?.authenticated && session.user?.phone) {
+          setIsAuthenticated(true);
+          setAuthPhone(session.user.phone);
+        }
+      })
+      .catch(() => {});
   }, []);
 
   // Restore recent searches from a previous visit — same "start empty during
@@ -825,9 +827,9 @@ export function HomeClient({ products }: { products: Product[] }) {
     }
   };
 
-  const refreshOrders = async (phone: string) => {
+  const refreshOrders = async () => {
     try {
-      const response = await fetch(`/api/orders?phone=${encodeURIComponent(phone)}`);
+      const response = await fetch("/api/orders");
       if (!response.ok) return;
       const data = (await response.json()) as {
         orders: Array<{
@@ -968,9 +970,7 @@ export function HomeClient({ products }: { products: Product[] }) {
     setSelectedProduct(null);
     setViewedOrderId(null);
     setIsOrdersPanelOpen(true);
-    if (authPhone) {
-      void refreshOrders(authPhone);
-    }
+    if (authPhone) void refreshOrders();
   };
 
   const handleReorderOrder = (order: Order) => {
@@ -997,7 +997,7 @@ export function HomeClient({ products }: { products: Product[] }) {
    * without a full page reload.
    */
   const requestRefund = async (order: Order, reason: string) => {
-    if (!authPhone || isRequestingRefund) return;
+    if (!isAuthenticated || isRequestingRefund) return;
 
     setIsRequestingRefund(true);
     setRefundRequestError(null);
@@ -1005,14 +1005,14 @@ export function HomeClient({ products }: { products: Product[] }) {
       const response = await fetch(`/api/orders/${order.dbId}/refund`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone: authPhone, reason }),
+        body: JSON.stringify({ reason }),
       });
       const data = (await response.json().catch(() => ({}))) as { error?: string };
       if (!response.ok) {
         setRefundRequestError(data.error ?? "Could not submit the refund request.");
         return;
       }
-      await refreshOrders(authPhone);
+      await refreshOrders();
     } catch {
       setRefundRequestError("Could not submit the refund request. Check your connection and try again.");
     } finally {
@@ -1029,7 +1029,7 @@ export function HomeClient({ products }: { products: Product[] }) {
    * this, so (unlike requestRefund above) there's no separate reason step.
    */
   const cancelOrder = async (order: Order) => {
-    if (!authPhone || isCancellingOrder) return;
+    if (!isAuthenticated || isCancellingOrder) return;
 
     setIsCancellingOrder(true);
     setCancelOrderError(null);
@@ -1037,14 +1037,14 @@ export function HomeClient({ products }: { products: Product[] }) {
       const response = await fetch(`/api/orders/${order.dbId}/cancel`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone: authPhone }),
+        body: JSON.stringify({}),
       });
       const data = (await response.json().catch(() => ({}))) as { error?: string };
       if (!response.ok) {
         setCancelOrderError(data.error ?? "Could not cancel this order.");
         return;
       }
-      await refreshOrders(authPhone);
+      await refreshOrders();
     } catch {
       setCancelOrderError("Could not cancel this order. Check your connection and try again.");
     } finally {
@@ -1068,7 +1068,7 @@ export function HomeClient({ products }: { products: Product[] }) {
       return;
     }
 
-    if (!authPhone) {
+    if (!isAuthenticated) {
       setCheckoutError("Please log in again before checking out.");
       return;
     }
@@ -1082,7 +1082,6 @@ export function HomeClient({ products }: { products: Product[] }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           customerName: address.contactName || "Customer",
-          customerPhone: authPhone,
           bikeLabel:
             selectedBrandData && selectedModel
               ? `${selectedBrandData.name} ${selectedModel} (${selectedYear})`
@@ -1148,7 +1147,7 @@ export function HomeClient({ products }: { products: Product[] }) {
 
               setCart({});
               setIsAddressPanelOpen(false);
-              await refreshOrders(authPhone);
+              await refreshOrders();
               void refreshStock();
               setViewedOrderId(null);
               setIsOrdersPanelOpen(true);
@@ -1208,13 +1207,44 @@ export function HomeClient({ products }: { products: Product[] }) {
   };
 
   const handleLogout = () => {
-    setIsAuthenticated(false);
-    setAuthPhone(null);
-    setIsAccountMenuOpen(false);
+    void fetch("/api/auth/logout", { method: "POST" }).finally(() => {
+      setIsAuthenticated(false);
+      setAuthPhone(null);
+      setIsAccountMenuOpen(false);
+    });
+  };
+
+  const requestCustomerOtp = async (phone: string) => {
     try {
-      localStorage.removeItem(AUTH_STORAGE_KEY);
+      const response = await fetch("/api/auth/otp/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone }),
+      });
+      if (!response.ok) {
+        const data = (await response.json().catch(() => ({}))) as { error?: string };
+        return data.error ?? "Could not send OTP.";
+      }
+      return null;
     } catch {
-      // Nothing to clean up if storage isn't available.
+      return "Could not send OTP. Check your connection and try again.";
+    }
+  };
+
+  const verifyCustomerOtp = async (phone: string, otp: string) => {
+    try {
+      const response = await fetch("/api/auth/otp/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone, otp }),
+      });
+      if (!response.ok) {
+        const data = (await response.json().catch(() => ({}))) as { error?: string };
+        return data.error ?? "Could not verify OTP.";
+      }
+      return null;
+    } catch {
+      return "Could not verify OTP. Check your connection and try again.";
     }
   };
 
@@ -2534,15 +2564,13 @@ export function HomeClient({ products }: { products: Product[] }) {
       {isLoginModalOpen ? (
         <LoginModal
           onClose={() => setIsLoginModalOpen(false)}
+          onRequestOtp={requestCustomerOtp}
+          onVerifyOtp={verifyCustomerOtp}
           onLoginSuccess={(phone) => {
             setIsAuthenticated(true);
             setAuthPhone(phone);
             setIsLoginModalOpen(false);
-            try {
-              localStorage.setItem(AUTH_STORAGE_KEY, phone);
-            } catch {
-              // Login still works for this session even if it can't persist.
-            }
+            void refreshOrders();
           }}
         />
       ) : null}

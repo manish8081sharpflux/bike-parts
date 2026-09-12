@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { getCustomerSession } from "@/lib/auth/customer-session";
 
 /**
  * Returns order history for a phone number. The storefront's login is a
@@ -7,16 +8,12 @@ import { prisma } from "@/lib/db";
  * same way the rest of the app does — it is not a secure per-user API and
  * should not be treated as one once real OTP/auth is added.
  */
-export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const phone = searchParams.get("phone")?.trim();
-
-  if (!phone) {
-    return NextResponse.json({ error: "phone is required." }, { status: 400 });
-  }
+export async function GET() {
+  const session = await getCustomerSession();
+  if (!session) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
 
   const orders = await prisma.order.findMany({
-    where: { customerPhone: phone },
+    where: { buyerId: session.user.id },
     orderBy: { createdAt: "desc" },
     include: {
       items: true,

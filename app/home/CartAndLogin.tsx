@@ -223,15 +223,21 @@ export function CartDrawer({
 
 export function LoginModal({
   onClose,
+  onRequestOtp,
+  onVerifyOtp,
   onLoginSuccess,
 }: {
   onClose: () => void;
+  onRequestOtp: (phone: string) => Promise<string | null>;
+  onVerifyOtp: (phone: string, otp: string) => Promise<string | null>;
   onLoginSuccess: (phone: string) => void;
 }) {
   const [step, setStep] = useState<"phone" | "otp">("phone");
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState(["", "", "", "", "", ""]);
   const [resendCooldown, setResendCooldown] = useState(30);
+  const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const otpInputRefs = useRef<Array<HTMLInputElement | null>>([]);
 
   useEffect(() => {
@@ -249,13 +255,34 @@ export function LoginModal({
   const isPhoneValid = phone.trim().length === 10;
   const isOtpComplete = otp.every((digit) => digit !== "");
 
-  const handleContinue = () => {
+  const handleContinue = async () => {
     if (!isPhoneValid) {
       return;
     }
 
+    setError(null);
+    setIsSubmitting(true);
+    const requestError = await onRequestOtp(phone);
+    setIsSubmitting(false);
+    if (requestError) {
+      setError(requestError);
+      return;
+    }
     setStep("otp");
     setResendCooldown(30);
+  };
+
+  const handleVerify = async () => {
+    if (!isOtpComplete) return;
+    setError(null);
+    setIsSubmitting(true);
+    const verifyError = await onVerifyOtp(phone, otp.join(""));
+    setIsSubmitting(false);
+    if (verifyError) {
+      setError(verifyError);
+      return;
+    }
+    onLoginSuccess(phone);
   };
 
   const handleOtpChange = (index: number, value: string) => {
@@ -341,13 +368,14 @@ export function LoginModal({
 
             <button
               type="button"
-              onClick={handleContinue}
-              disabled={!isPhoneValid}
+              onClick={() => void handleContinue()}
+              disabled={!isPhoneValid || isSubmitting}
               className="mt-3 flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#ff4b1f] text-sm font-bold text-white shadow-sm shadow-orange-200 transition hover:bg-[#e8330e] disabled:cursor-not-allowed disabled:opacity-40 sm:mt-4 sm:h-12 sm:text-base"
             >
               Continue
               <ArrowRight className="size-4 sm:size-5" />
             </button>
+            {error ? <p className="mt-3 text-center text-xs font-medium text-red-600">{error}</p> : null}
 
             <p className="mt-3 text-center text-[11px] text-zinc-500 sm:mt-5 sm:text-xs">
               By continuing, you agree to our{" "}
@@ -397,13 +425,14 @@ export function LoginModal({
 
             <button
               type="button"
-              onClick={() => onLoginSuccess(phone)}
-              disabled={!isOtpComplete}
+              onClick={() => void handleVerify()}
+              disabled={!isOtpComplete || isSubmitting}
               className="mt-4 flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#ff4b1f] text-sm font-bold text-white shadow-sm shadow-orange-200 transition hover:bg-[#e8330e] disabled:cursor-not-allowed disabled:opacity-40 sm:mt-6 sm:h-12 sm:text-base"
             >
               Verify & Continue
               <ArrowRight className="size-4 sm:size-5" />
             </button>
+            {error ? <p className="mt-3 text-center text-xs font-medium text-red-600">{error}</p> : null}
 
             <p className="mt-3 text-center text-[11px] text-zinc-500 sm:mt-4 sm:text-xs">
               {resendCooldown > 0 ? (
@@ -411,7 +440,7 @@ export function LoginModal({
               ) : (
                 <button
                   type="button"
-                  onClick={() => setResendCooldown(30)}
+                  onClick={() => void handleContinue()}
                   className="font-bold text-[#ff4b1f] hover:underline"
                 >
                   Resend OTP

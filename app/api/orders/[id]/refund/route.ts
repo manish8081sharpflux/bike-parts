@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { getCustomerSession } from "@/lib/auth/customer-session";
 
 /**
  * Customer-initiated refund request. Same trust model as the rest of the
@@ -11,19 +12,18 @@ import { prisma } from "@/lib/db";
  */
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  const session = await getCustomerSession();
+  if (!session) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+
   const body = await request.json().catch(() => null);
-  const phone = typeof body?.phone === "string" ? body.phone.trim() : "";
   const reason = typeof body?.reason === "string" ? body.reason.trim() : "";
 
-  if (!phone) {
-    return NextResponse.json({ error: "phone is required." }, { status: 400 });
-  }
   if (!reason) {
     return NextResponse.json({ error: "A reason is required to request a refund." }, { status: 400 });
   }
 
   const order = await prisma.order.findUnique({ where: { id } });
-  if (!order || order.customerPhone !== phone) {
+  if (!order || order.buyerId !== session.user.id) {
     return NextResponse.json({ error: "Order not found." }, { status: 404 });
   }
 

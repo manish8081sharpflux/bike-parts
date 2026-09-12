@@ -8,6 +8,7 @@ import {
   reserveStock,
 } from "@/lib/checkout-stock";
 import { calculateCheckoutTotals } from "@/lib/checkout-amount";
+import { getCustomerSession } from "@/lib/auth/customer-session";
 
 type CheckoutItem = {
   id: string;
@@ -16,13 +17,17 @@ type CheckoutItem = {
 
 type CheckoutBody = {
   customerName: string;
-  customerPhone: string;
   bikeLabel?: string;
   deliveryAddress: Record<string, unknown>;
   items: CheckoutItem[];
 };
 
 export async function POST(request: Request) {
+  const session = await getCustomerSession();
+  if (!session) {
+    return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+  }
+
   if (!isRazorpayConfigured()) {
     return NextResponse.json(
       { error: "Payments are not configured on the server yet." },
@@ -37,21 +42,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
   }
 
-  if (!body.customerName || !body.customerPhone || !Array.isArray(body.items) || body.items.length === 0) {
+  if (!body.customerName || !Array.isArray(body.items) || body.items.length === 0) {
     return NextResponse.json(
-      { error: "customerName, customerPhone, and at least one item are required." },
+      { error: "customerName and at least one item are required." },
       { status: 400 }
     );
-  }
-
-  // Phone is the primary customer identifier (upsert key on User, and the
-  // contact number handed to Porter for delivery) — previously accepted as
-  // any non-empty string, so "abc" or "1" would silently create an
-  // undeliverable order. Matches the same 10-digit rule LoginModal already
-  // enforces client-side, so a request that actually came through the
-  // storefront's own login can never trip this.
-  if (!/^\d{10}$/.test(body.customerPhone)) {
-    return NextResponse.json({ error: "A valid 10-digit phone number is required." }, { status: 400 });
   }
 
   // deliveryAddress was previously accepted as-is with zero validation —
@@ -140,17 +135,16 @@ export async function POST(request: Request) {
     throw error;
   }
 
-  const user = await prisma.user.upsert({
-    where: { phone: body.customerPhone },
-    update: { name: body.customerName },
-    create: { phone: body.customerPhone, name: body.customerName },
-  });
+  const user = session.user;
+  if (body.customerName !== user.name) {
+    await prisma.user.update({ where: { id: user.id }, data: { name: body.customerName } });
+  }
 
   const order = await prisma.order.create({
     data: {
       buyerId: user.id,
       customerName: body.customerName,
-      customerPhone: body.customerPhone,
+      customerPhone: user.phone!,
       bikeLabel: body.bikeLabel,
       deliveryAddress: body.deliveryAddress as object,
       itemsTotal,
@@ -175,7 +169,7 @@ export async function POST(request: Request) {
     const razorpayOrder = await createRazorpayOrder({
       amountInPaise: Math.round(amount * 100),
       receipt: order.id,
-      notes: { orderId: order.id, customerPhone: body.customerPhone },
+      notes: { orderId: order.id, customerPhone: user.phone! },
     });
 
     await prisma.order.update({
