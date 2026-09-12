@@ -111,11 +111,17 @@ export async function POST(request: Request) {
 
   try {
     await processRazorpayWebhook(payload);
-    await markWebhookProcessed(claim.id, claim.attempts);
+    const marked = await markWebhookProcessed(claim.id, claim.attempts);
+    if (!marked) {
+      return NextResponse.json({ error: "Webhook claim is no longer current." }, { status: 409 });
+    }
     return NextResponse.json({ received: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Webhook processing failed.";
-    await markWebhookFailed(claim.id, claim.attempts, message);
+    const markedFailed = await markWebhookFailed(claim.id, claim.attempts, message);
+    if (!markedFailed) {
+      return NextResponse.json({ error: "Webhook claim is no longer current." }, { status: 409 });
+    }
     return NextResponse.json({ error: "Webhook processing failed." }, { status: 500 });
   }
 }

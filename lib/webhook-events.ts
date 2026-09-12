@@ -30,7 +30,7 @@ export async function claimWebhookEvent(input: {
     INSERT INTO "WebhookEvent" ("id", "provider", "eventId", "eventType", "payloadHash", "status", "attempts", "processingStartedAt")
     VALUES (${crypto.randomUUID()}, ${input.provider}, ${input.eventId}, ${input.eventType}, ${payloadHash}, 'PROCESSING', 1, now())
     ON CONFLICT ("provider", "eventId") DO NOTHING
-    RETURNING "id"
+    RETURNING "id", "attempts"
   `;
   if (inserted.length === 1) return { status: "claimed", id: inserted[0].id, attempts: inserted[0].attempts };
 

@@ -20,6 +20,7 @@ test("successful webhook is marked processed and duplicate is a no-op", async ()
   const first = await claimWebhookEvent(input(eventId));
   assert.equal(first.status, "claimed");
   if (first.status !== "claimed") return;
+  assert.equal(first.attempts, 1);
   assert.equal(await markWebhookProcessed(first.id, first.attempts), true);
   assert.deepEqual(await claimWebhookEvent(input(eventId)), { status: "already_processed" });
 });
@@ -77,6 +78,30 @@ test("stale processing events can be reclaimed but fresh ones cannot", async () 
     },
   });
   assert.deepEqual(await claimWebhookEvent(input(freshId)), { status: "in_progress" });
+});
+
+test("stale workers cannot finish or fail a newer attempt", async () => {
+  const eventId = `fenced-${suffix}`;
+  const first = await claimWebhookEvent(input(eventId));
+  assert.equal(first.status, "claimed");
+  if (first.status !== "claimed") return;
+  await prisma.webhookEvent.update({
+    where: { id: first.id },
+    data: { processingStartedAt: new Date(Date.now() - 10 * 60 * 1000) },
+  });
+
+  const second = await claimWebhookEvent(input(eventId));
+  assert.equal(second.status, "claimed");
+  if (second.status !== "claimed") return;
+  assert.equal(second.attempts, 2);
+  assert.equal(await markWebhookProcessed(first.id, first.attempts), false);
+  assert.equal(await markWebhookFailed(first.id, first.attempts, "late failure"), false);
+  assert.equal(await markWebhookProcessed(second.id, second.attempts), true);
+
+  const row = await prisma.webhookEvent.findUniqueOrThrow({ where: { id: second.id } });
+  assert.equal(row.status, "PROCESSED");
+  assert.equal(row.attempts, 2);
+  assert.ok(row.processedAt);
 });
 
 after(async () => {
