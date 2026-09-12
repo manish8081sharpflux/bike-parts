@@ -868,6 +868,7 @@ export function HomeClient({ products }: { products: Product[] }) {
         brand: "",
         category: "",
         price: formatPrice(item.unitPrice),
+        gstRate: 18,
         image: item.image || "/assets/home/part-engine.png",
         images: [],
         stock: 0,
@@ -1089,12 +1090,8 @@ export function HomeClient({ products }: { products: Product[] }) {
           deliveryAddress: address,
           items: cartItems.map((line) => ({
             id: line.product.id,
-            name: line.product.name,
-            price: parsePrice(line.product.price),
-            image: line.product.image,
             quantity: line.quantity,
           })),
-          deliveryCharge: 0,
         }),
       });
 

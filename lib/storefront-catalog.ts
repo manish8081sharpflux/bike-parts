@@ -10,6 +10,7 @@ export type Product = {
   category: string;
   /** Comma-grouped, no currency symbol — e.g. "2,450" — matches how every render site already interpolates `₹{product.price}`. */
   price: string;
+  gstRate: number;
   image: string;
   images: string[];
   stock: number;
@@ -43,7 +44,8 @@ export function mapListingToProduct(listing: BikePartListing): Product {
     name: listing.name,
     brand: listing.brand,
     category: listing.category,
-    price: Math.round(Number(listing.price)).toLocaleString("en-IN"),
+    price: Number(listing.price).toLocaleString("en-IN", { maximumFractionDigits: 2 }),
+    gstRate: Number(listing.gstRate),
     image: listing.imageUrl || FALLBACK_IMAGE,
     images: listing.images,
     stock: listing.stock,

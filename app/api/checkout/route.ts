@@ -7,6 +7,7 @@ import {
   releaseOrderStock,
   reserveStock,
 } from "@/lib/checkout-stock";
+import { calculateCheckoutTotals } from "@/lib/checkout-amount";
 
 type CheckoutItem = {
   id: string;
@@ -19,9 +20,6 @@ type CheckoutBody = {
   bikeLabel?: string;
   deliveryAddress: Record<string, unknown>;
   items: CheckoutItem[];
-  deliveryCharge?: number;
-  discount?: number;
-  taxRate?: number;
 };
 
 export async function POST(request: Request) {
@@ -97,7 +95,7 @@ export async function POST(request: Request) {
   });
   const catalogById = new Map(catalogItems.map((item) => [item.id, item]));
 
-  const resolvedItems: Array<{ id: string; name: string; image?: string; price: number; quantity: number }> = [];
+  const resolvedItems: Array<{ id: string; name: string; image?: string; price: number; gstRate: number; quantity: number }> = [];
   for (const raw of body.items) {
     const quantity = Number(raw?.quantity);
     const catalogItem = raw && typeof raw.id === "string" ? catalogById.get(raw.id) : undefined;
@@ -112,16 +110,13 @@ export async function POST(request: Request) {
       name: catalogItem.name,
       image: catalogItem.imageUrl ?? undefined,
       price: Number(catalogItem.price),
+      gstRate: Number(catalogItem.gstRate),
       quantity: Math.floor(quantity),
     });
   }
 
-  const itemsTotal = resolvedItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
-  const taxRate = Math.min(Math.max(body.taxRate ?? 0.18, 0), 1);
-  const taxAmount = Math.round(itemsTotal * taxRate);
-  const deliveryCharge = Math.max(0, body.deliveryCharge ?? 0);
-  const discount = Math.max(0, body.discount ?? 0);
-  const amount = Math.max(0, itemsTotal + taxAmount + deliveryCharge - discount);
+  const { itemsTotal, taxAmount, deliveryCharge, discount, amount } =
+    calculateCheckoutTotals(resolvedItems);
 
   // Reserve stock atomically before creating anything else. If two people
   // hit checkout for the last unit of the same item at the same instant,

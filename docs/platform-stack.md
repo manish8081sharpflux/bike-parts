@@ -89,11 +89,7 @@ values are exposed to the browser.
 - **Checkout**: `POST /api/checkout` creates a DB `Order` + a Razorpay order;
   the storefront opens Razorpay Checkout.js, then `POST /api/checkout/verify`
   checks the payment signature and marks the order paid.
-  `POST /api/webhooks/razorpay` is a webhook safety net for the
-  `payment.captured` event. **Known limitation**: line-item prices are
-  trusted from the client because the storefront catalog (`app/page.tsx`) is
-  still static frontend data, not `BikePartListing` rows — re-validate prices
-  server-side once the catalog moves into the database.
+  `POST /api/webhooks/razorpay` is a webhook safety net for the `payment.captured` event. Checkout resolves prices and GST from active `BikePartListing` rows server-side; delivery charge and discount are also server-defined.
 - **Delivery**: `lib/porter.ts` wraps Porter's commonly documented Partner
   API v1 shape (quote/create/track). Porter's actual contract is
   partner-specific — adjust `PORTER_API_BASE_URL` and the payload builders in

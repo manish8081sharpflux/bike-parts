@@ -6,6 +6,7 @@ import Image from "next/image";
 import { ArrowRight, Minus, Plus, Settings, ShoppingCart, X } from "lucide-react";
 import type { CartLine } from "./types";
 import { parsePrice, formatPrice } from "./utils";
+import { calculateCheckoutTotals } from "@/lib/checkout-amount";
 
 export function CartDrawer({
   isOpen,
@@ -41,8 +42,13 @@ export function CartDrawer({
     (sum, item) => sum + parsePrice(item.product.price) * item.quantity,
     0
   );
-  const gst = Math.round(subtotal * 0.18);
-  const total = subtotal + gst;
+  const { taxAmount: gst, amount: total } = calculateCheckoutTotals(
+    items.map(({ product, quantity }) => ({
+      price: parsePrice(product.price),
+      gstRate: product.gstRate,
+      quantity,
+    }))
+  );
 
   return (
     <div className="fixed inset-0 z-50">
@@ -179,7 +185,7 @@ export function CartDrawer({
                   <span className="font-bold text-emerald-600">Free</span>
                 </div>
                 <div className="flex items-center justify-between text-zinc-600">
-                  <span>GST (18%)</span>
+                  <span>GST</span>
                   <span className="font-bold text-[#070e2b]">
                     &#8377;{formatPrice(gst)}
                   </span>
