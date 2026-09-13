@@ -26,7 +26,7 @@ async function sendOtp(phoneNumber, ip = `auth-test-${randomInt(1, 1_000_000)}`)
   });
   const data = await response.json();
   assert.equal(response.status, 200, JSON.stringify(data));
-  assert.match(data.developmentOtp, /^\d{6}$/);
+  assert.match(data.developmentOtp, /^\d{4}$/);
   return data.developmentOtp;
 }
 

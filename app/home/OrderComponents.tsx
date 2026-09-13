@@ -133,6 +133,21 @@ export function OrderListRow({
           </>
         )}
 
+        {order.returnStatus !== "none" ? (
+          <span
+            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-black uppercase tracking-wide ${
+              order.returnStatus === "received"
+                ? "bg-emerald-50 text-emerald-700"
+                : order.returnStatus === "rejected"
+                ? "bg-red-50 text-red-700"
+                : "bg-blue-50 text-blue-700"
+            }`}
+          >
+            <RotateCw className="size-3" />
+            Return {order.returnStatus.replace(/_/g, " ")}
+          </span>
+        ) : null}
+
         {order.refundStatus !== "none" ? (
           <span
             className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-black uppercase tracking-wide ${
@@ -182,7 +197,7 @@ export function OrdersListPage({
   onOpenOrder: (orderId: string) => void;
   onReorder: (order: Order) => void;
 }) {
-  const ORDERS_PAGE_SIZE = 5;
+  const ORDERS_PAGE_SIZE = 6;
   const [activeFilter, setActiveFilter] = useState<OrderStatus | "all">("all");
   const [currentPage, setCurrentPage] = useState(1);
   const filteredOrders = activeFilter === "all" ? orders : orders.filter((order) => order.status === activeFilter);
@@ -343,26 +358,26 @@ export function DeliveryRouteMap({ rider, order }: { rider: ReturnType<typeof ge
 export function OrderDetailView({
   order,
   onBack,
-  onRequestRefund,
-  isRequestingRefund,
-  refundRequestError,
+  onRequestReturn,
+  isRequestingReturn,
+  returnRequestError,
   onCancelOrder,
   isCancellingOrder,
   cancelOrderError,
 }: {
   order: Order;
   onBack: () => void;
-  /** Submits a refund request with the given reason for this order. */
-  onRequestRefund: (reason: string) => void;
-  isRequestingRefund: boolean;
-  refundRequestError: string | null;
+  /** Submits a return request with the given reason for this order. */
+  onRequestReturn: (reason: string) => void;
+  isRequestingReturn: boolean;
+  returnRequestError: string | null;
   /** Cancels this order outright — a paid order's refund is then requested automatically, no separate step needed. */
   onCancelOrder: () => void;
   isCancellingOrder: boolean;
   cancelOrderError: string | null;
 }) {
-  const [isRefundFormOpen, setIsRefundFormOpen] = useState(false);
-  const [refundReasonDraft, setRefundReasonDraft] = useState("");
+  const [isReturnFormOpen, setIsReturnFormOpen] = useState(false);
+  const [returnReasonDraft, setReturnReasonDraft] = useState("");
   const [isCancelConfirmOpen, setIsCancelConfirmOpen] = useState(false);
   const currentStepIndex = stepIndexForStatus[order.status];
   const isOutForDelivery = order.status === "out_for_delivery";
@@ -470,15 +485,140 @@ export function OrderDetailView({
           </div>
 
           {/*
-            Refund card — only relevant once the order was actually paid for,
-            and (while there's no refund already in play) only once it's
-            either been delivered (a post-delivery return/refund request) or
-            cancelled (which auto-requests the refund itself — see the
-            Cancel order card below and onCancelOrder). While an order is
-            still processing/out for delivery there's nothing to show here:
-            the right move at that stage is to cancel, not request a refund.
+            Return card — where the customer starts a return and tracks it
+            end to end (Requested -> admin Approved/Rejected -> Porter
+            pickup -> Received). Only makes sense once the order was
+            delivered (isDelivered) or a return is already in play — a
+            cancelled order was never received, so there's nothing to
+            return. The refund itself is handled entirely by the Refund
+            card below, which activates automatically once the admin
+            confirms the returned item is back at the warehouse.
           */}
-          {order.isPaid && (isDelivered || isCancelled || order.refundStatus !== "none") ? (
+          {order.isPaid && (isDelivered || order.returnStatus !== "none") ? (
+            <div className="rounded-xl border border-zinc-100 bg-white p-5 shadow-sm">
+              <h3 className="flex items-center gap-2 text-sm font-black text-[#070e2b]">
+                <RotateCw className="size-4.5 text-zinc-500" />
+                Return
+              </h3>
+
+              {order.returnStatus === "received" ? (
+                <div className="mt-3 rounded-lg bg-emerald-50 px-4 py-3 text-xs font-medium text-emerald-700">
+                  <p className="font-bold">We&apos;ve received your returned item.</p>
+                  <p className="mt-1">Your refund is now being processed — see below.</p>
+                </div>
+              ) : order.returnStatus === "picked_up" ? (
+                <div className="mt-3 rounded-lg bg-blue-50 px-4 py-3 text-xs font-medium text-blue-700">
+                  <p className="font-bold">Picked up — on its way back to our warehouse.</p>
+                  {order.returnPorterTrackingUrl ? (
+                    <a
+                      href={order.returnPorterTrackingUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-1 inline-block font-bold underline"
+                    >
+                      Track pickup ↗
+                    </a>
+                  ) : null}
+                </div>
+              ) : order.returnStatus === "pickup_scheduled" ? (
+                <div className="mt-3 rounded-lg bg-blue-50 px-4 py-3 text-xs font-medium text-blue-700">
+                  <p className="font-bold">Pickup scheduled — our courier will collect the item soon.</p>
+                  {order.returnPorterTrackingUrl ? (
+                    <a
+                      href={order.returnPorterTrackingUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-1 inline-block font-bold underline"
+                    >
+                      Track pickup ↗
+                    </a>
+                  ) : null}
+                </div>
+              ) : order.returnStatus === "approved" ? (
+                <div className="mt-3 rounded-lg bg-amber-50 px-4 py-3 text-xs font-medium text-amber-800">
+                  <p className="font-bold">Return approved — pickup will be scheduled soon.</p>
+                </div>
+              ) : order.returnStatus === "requested" ? (
+                <div className="mt-3 rounded-lg bg-amber-50 px-4 py-3 text-xs font-medium text-amber-800">
+                  <p className="font-bold">Return requested — awaiting review.</p>
+                  {order.returnReason ? <p className="mt-1">Your reason: {order.returnReason}</p> : null}
+                </div>
+              ) : (
+                <>
+                  {order.returnStatus === "rejected" ? (
+                    <div className="mt-3 rounded-lg bg-red-50 px-4 py-3 text-xs font-medium text-red-700">
+                      <p className="font-bold">Your return request was declined.</p>
+                      {order.returnAdminNote ? <p className="mt-1">{order.returnAdminNote}</p> : null}
+                    </div>
+                  ) : null}
+
+                  {isReturnFormOpen ? (
+                    <div className="mt-3 flex flex-col gap-2">
+                      <textarea
+                        value={returnReasonDraft}
+                        onChange={(event) => setReturnReasonDraft(event.target.value)}
+                        placeholder="Tell us why you'd like to return this…"
+                        rows={3}
+                        className="rounded-lg border border-zinc-200 px-3 py-2 text-xs outline-none focus:border-zinc-500"
+                      />
+                      {returnRequestError ? (
+                        <p className="text-xs font-medium text-red-600">{returnRequestError}</p>
+                      ) : null}
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          disabled={!returnReasonDraft.trim() || isRequestingReturn}
+                          onClick={() => {
+                            // Don't close the form here — closing immediately
+                            // hid the error message on failure (the form and
+                            // its error text unmount before the request even
+                            // resolves). On success, order.returnStatus moves
+                            // to "requested" via refreshOrders, which makes
+                            // the branch above take over and the form
+                            // disappear naturally; on failure it stays open
+                            // with returnRequestError now visible.
+                            onRequestReturn(returnReasonDraft.trim());
+                          }}
+                          className="flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg bg-[#ff4b1f] text-xs font-black text-white transition hover:bg-[#e8330e] disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          {isRequestingReturn ? <Loader2 className="size-3.5 animate-spin" /> : null}
+                          Submit request
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsReturnFormOpen(false);
+                            setReturnReasonDraft("");
+                          }}
+                          className="h-9 rounded-lg border border-zinc-200 px-3 text-xs font-bold text-zinc-600 hover:bg-zinc-50"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setIsReturnFormOpen(true)}
+                      className="mt-3 flex h-9 w-full items-center justify-center gap-1.5 rounded-lg border border-zinc-200 text-xs font-bold text-zinc-700 transition hover:bg-zinc-50"
+                    >
+                      {order.returnStatus === "rejected" ? "Request return again" : "Return product"}
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          ) : null}
+
+          {/*
+            Refund card — the money side, kept separate from the Return
+            card above. Only ever activates once a refund has actually been
+            requested: automatically for a cancelled order (see the Cancel
+            order card below and onCancelOrder) or once a return reaches
+            "received" (see the Return card above) — there's no direct
+            customer-facing "request a refund" action anymore.
+          */}
+          {order.isPaid && (isCancelled || order.refundStatus !== "none") ? (
             <div className="rounded-xl border border-zinc-100 bg-white p-5 shadow-sm">
               <h3 className="flex items-center gap-2 text-sm font-black text-[#070e2b]">
                 <Banknote className="size-4.5 text-zinc-500" />
@@ -507,75 +647,16 @@ export function OrderDetailView({
                   Your refund has been approved and is being processed — this usually reaches your original
                   payment method within a few business days.
                 </div>
+              ) : order.refundStatus === "rejected" ? (
+                <div className="mt-3 rounded-lg bg-red-50 px-4 py-3 text-xs font-medium text-red-700">
+                  <p className="font-bold">Your last refund request was declined.</p>
+                  {order.refundAdminNote ? <p className="mt-1">{order.refundAdminNote}</p> : null}
+                </div>
               ) : (
-                <>
-                  {order.refundStatus === "rejected" ? (
-                    <div className="mt-3 rounded-lg bg-red-50 px-4 py-3 text-xs font-medium text-red-700">
-                      <p className="font-bold">Your last refund request was declined.</p>
-                      {order.refundAdminNote ? <p className="mt-1">{order.refundAdminNote}</p> : null}
-                    </div>
-                  ) : null}
-
-                  {/*
-                    Once an order is cancelled, our side already requests the
-                    refund automatically (whichever of us — customer or admin —
-                    cancelled it, see onCancelOrder here and
-                    updateOrderStatusAction on the admin side) — so there's
-                    nothing left for the customer to manually ask for here.
-                  */}
-                  {isCancelled ? (
-                    <div className="mt-3 rounded-lg bg-zinc-50 px-4 py-3 text-xs font-medium text-zinc-600">
-                      This order was cancelled. If you paid for it, we&apos;re processing your refund — no
-                      need to request it separately.
-                    </div>
-                  ) : !isDelivered ? null : isRefundFormOpen ? (
-                    <div className="mt-3 flex flex-col gap-2">
-                      <textarea
-                        value={refundReasonDraft}
-                        onChange={(event) => setRefundReasonDraft(event.target.value)}
-                        placeholder="Tell us why you'd like a refund…"
-                        rows={3}
-                        className="rounded-lg border border-zinc-200 px-3 py-2 text-xs outline-none focus:border-zinc-500"
-                      />
-                      {refundRequestError ? (
-                        <p className="text-xs font-medium text-red-600">{refundRequestError}</p>
-                      ) : null}
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          disabled={!refundReasonDraft.trim() || isRequestingRefund}
-                          onClick={() => {
-                            onRequestRefund(refundReasonDraft.trim());
-                            setIsRefundFormOpen(false);
-                            setRefundReasonDraft("");
-                          }}
-                          className="flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg bg-[#ff4b1f] text-xs font-black text-white transition hover:bg-[#e8330e] disabled:cursor-not-allowed disabled:opacity-40"
-                        >
-                          {isRequestingRefund ? <Loader2 className="size-3.5 animate-spin" /> : null}
-                          Submit request
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setIsRefundFormOpen(false);
-                            setRefundReasonDraft("");
-                          }}
-                          className="h-9 rounded-lg border border-zinc-200 px-3 text-xs font-bold text-zinc-600 hover:bg-zinc-50"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setIsRefundFormOpen(true)}
-                      className="mt-3 flex h-9 w-full items-center justify-center gap-1.5 rounded-lg border border-zinc-200 text-xs font-bold text-zinc-700 transition hover:bg-zinc-50"
-                    >
-                      {order.refundStatus === "rejected" ? "Request refund again" : "Request refund"}
-                    </button>
-                  )}
-                </>
+                <div className="mt-3 rounded-lg bg-zinc-50 px-4 py-3 text-xs font-medium text-zinc-600">
+                  This order was cancelled. If you paid for it, we&apos;re processing your refund — no
+                  need to request it separately.
+                </div>
               )}
             </div>
           ) : null}

@@ -478,7 +478,7 @@ export const orderStatusMeta: Record<
   { label: string; icon: LucideIcon; iconClassName: string; bannerClassName: string }
 > = {
   processing: {
-    label: "Processing",
+    label: "Preparing",
     icon: Clock,
     iconClassName: "bg-amber-50 text-amber-600",
     bannerClassName: "bg-amber-50 text-amber-700",
@@ -542,7 +542,7 @@ export const DEFAULT_MAP_CENTER = { lat: 25.5941, lon: 85.1376 }; // Patna
 
 export const orderStatusFilters: Array<{ key: OrderStatus | "all"; label: string }> = [
   { key: "all", label: "All Orders" },
-  { key: "processing", label: "Processing" },
+  { key: "processing", label: "Preparing" },
   { key: "out_for_delivery", label: "Out for Delivery" },
   { key: "delivered", label: "Delivered" },
   { key: "cancelled", label: "Cancelled" },

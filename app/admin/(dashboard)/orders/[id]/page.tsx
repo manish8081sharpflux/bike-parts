@@ -1,12 +1,18 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { ChevronDown } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { formatInr } from "@/lib/format";
 import {
   approveRefundAction,
+  approveReturnAction,
   dispatchOrderAction,
+  dispatchReturnPickupAction,
+  markReturnReceivedAction,
   refreshDeliveryStatusAction,
+  refreshReturnPickupStatusAction,
   rejectRefundAction,
+  rejectReturnAction,
   updateOrderStatusAction,
 } from "@/lib/actions/admin-orders";
 import { RefundReadyPopup } from "./RefundReadyPopup";
@@ -74,6 +80,11 @@ export default async function AdminOrderDetailPage({
   const boundUpdateStatus = updateOrderStatusAction.bind(null, order.id);
   const boundApproveRefund = approveRefundAction.bind(null, order.id);
   const boundRejectRefund = rejectRefundAction.bind(null, order.id);
+  const boundApproveReturn = approveReturnAction.bind(null, order.id);
+  const boundRejectReturn = rejectReturnAction.bind(null, order.id);
+  const boundDispatchReturnPickup = dispatchReturnPickupAction.bind(null, order.id);
+  const boundRefreshReturnPickup = refreshReturnPickupStatusAction.bind(null, order.id);
+  const boundMarkReturnReceived = markReturnReceivedAction.bind(null, order.id);
 
   return (
     <div className="flex flex-col gap-4">
@@ -188,6 +199,142 @@ export default async function AdminOrderDetailPage({
             ) : null}
           </div>
 
+          {order.returnStatus !== "NONE" ? (
+            <div className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-zinc-100">
+              <h2 className="text-base font-black">Return</h2>
+
+              <p className="mt-2 text-sm">
+                Status:{" "}
+                <span
+                  className={`font-bold ${
+                    order.returnStatus === "REQUESTED"
+                      ? "text-amber-600"
+                      : order.returnStatus === "APPROVED" || order.returnStatus === "PICKUP_SCHEDULED"
+                      ? "text-blue-600"
+                      : order.returnStatus === "PICKED_UP"
+                      ? "text-blue-600"
+                      : order.returnStatus === "RECEIVED"
+                      ? "text-emerald-600"
+                      : "text-red-600"
+                  }`}
+                >
+                  {(order.returnStatus ?? "NONE").replace(/_/g, " ")}
+                </span>
+              </p>
+
+              {order.returnReason ? (
+                <p className="mt-2 text-xs text-zinc-500">
+                  <span className="font-bold text-zinc-700">Customer&apos;s reason: </span>
+                  {order.returnReason}
+                </p>
+              ) : null}
+
+              {order.returnStatus === "REQUESTED" ? (
+                <div className="mt-3 flex flex-col gap-2">
+                  <form action={boundApproveReturn} className="flex flex-col gap-2">
+                    <textarea
+                      name="returnAdminNote"
+                      placeholder="Note for this return (optional)"
+                      className="min-h-14 rounded-lg border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-500"
+                    />
+                    <button
+                      type="submit"
+                      className="h-10 rounded-lg bg-emerald-600 text-sm font-bold text-white hover:bg-emerald-700"
+                    >
+                      Approve return
+                    </button>
+                  </form>
+                  <form action={boundRejectReturn} className="flex flex-col gap-2">
+                    <textarea
+                      name="returnAdminNote"
+                      required
+                      placeholder="Reason for rejecting (required — the customer sees this)"
+                      className="min-h-14 rounded-lg border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-500"
+                    />
+                    <button
+                      type="submit"
+                      className="h-10 rounded-lg border border-red-200 text-sm font-bold text-red-700 hover:bg-red-50"
+                    >
+                      Reject return
+                    </button>
+                  </form>
+                </div>
+              ) : order.returnStatus === "APPROVED" ? (
+                <form action={boundDispatchReturnPickup} className="mt-3">
+                  <p className="mb-2 text-xs text-zinc-500">
+                    Creates a reverse Porter pickup — the customer&apos;s address becomes the pickup point,
+                    the warehouse the drop.
+                  </p>
+                  <button
+                    type="submit"
+                    className="h-10 w-full rounded-lg bg-[#ff4b1f] text-sm font-bold text-white hover:bg-[#e8330e]"
+                  >
+                    Dispatch pickup with Porter
+                  </button>
+                </form>
+              ) : order.returnStatus === "PICKUP_SCHEDULED" || order.returnStatus === "PICKED_UP" ? (
+                <div className="mt-3 flex flex-col gap-2">
+                  {order.returnPorterOrderId && order.returnPorterOrderId !== "DISPATCHING" ? (
+                    <p className="text-xs text-zinc-500">
+                      Porter order: <span className="font-mono">{order.returnPorterOrderId}</span> &bull;{" "}
+                      {order.returnPorterStatus ?? "unknown"}
+                    </p>
+                  ) : null}
+                  {order.returnPorterTrackingUrl ? (
+                    <a
+                      href={order.returnPorterTrackingUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-xs font-bold text-[#ff4b1f]"
+                    >
+                      Track pickup ↗
+                    </a>
+                  ) : null}
+                  <form action={boundRefreshReturnPickup}>
+                    <button
+                      type="submit"
+                      className="h-9 w-full rounded-lg border border-zinc-200 text-xs font-bold text-zinc-700 hover:bg-zinc-50"
+                    >
+                      Refresh pickup status
+                    </button>
+                  </form>
+                  <form action={boundMarkReturnReceived} className="flex flex-col gap-2">
+                    <textarea
+                      name="returnAdminNote"
+                      placeholder="Note on item condition (optional)"
+                      className="min-h-14 rounded-lg border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-500"
+                    />
+                    <button
+                      type="submit"
+                      className="h-10 rounded-lg bg-emerald-600 text-sm font-bold text-white hover:bg-emerald-700"
+                    >
+                      Mark received at warehouse
+                    </button>
+                  </form>
+                </div>
+              ) : order.returnStatus === "REJECTED" ? (
+                <p className="mt-2 text-xs text-zinc-500">
+                  <span className="font-bold text-zinc-700">Rejection note: </span>
+                  {order.returnAdminNote}
+                </p>
+              ) : (
+                <>
+                  {order.returnAdminNote ? (
+                    <p className="mt-2 text-xs text-zinc-500">
+                      <span className="font-bold text-zinc-700">Note: </span>
+                      {order.returnAdminNote}
+                    </p>
+                  ) : null}
+                  {order.returnReceivedAt ? (
+                    <p className="mt-1 text-xs text-zinc-400">
+                      Received {order.returnReceivedAt.toLocaleString("en-IN")} — see Refund below.
+                    </p>
+                  ) : null}
+                </>
+              )}
+            </div>
+          ) : null}
+
           {order.refundStatus !== "NONE" ? (
             <div className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-zinc-100">
               <h2 className="text-base font-black">Refund</h2>
@@ -288,17 +435,26 @@ export default async function AdminOrderDetailPage({
           <div className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-zinc-100">
             <h2 className="text-base font-black">Update status</h2>
             <form action={boundUpdateStatus} className="mt-3 flex flex-col gap-2">
-              <select
-                name="status"
-                defaultValue={toCustomerVisibleStatus(order.status)}
-                className="h-10 rounded-lg border border-zinc-300 px-3 text-sm outline-none focus:border-zinc-500"
-              >
-                {STATUS_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
+              <div className="relative">
+                {/* key={order.status} forces a remount whenever the saved status
+                    changes, so defaultValue re-applies — a plain re-render alone
+                    doesn't move an uncontrolled select's value in React, which
+                    previously left this dropdown stuck showing whatever status
+                    was current on the very first page load. */}
+                <select
+                  key={order.status}
+                  name="status"
+                  defaultValue={toCustomerVisibleStatus(order.status)}
+                  className="h-11 w-full appearance-none rounded-lg border border-zinc-300 bg-white px-3 pr-9 text-sm font-semibold text-[#070e2b] outline-none transition focus:border-[#ff4b1f] focus:ring-2 focus:ring-[#ff4b1f]/15"
+                >
+                  {STATUS_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-zinc-400" />
+              </div>
               <textarea
                 name="adminNote"
                 placeholder="Internal note (optional)"

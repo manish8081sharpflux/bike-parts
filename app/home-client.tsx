@@ -60,6 +60,7 @@ import {
   loadRazorpayCheckout,
   mapDbOrderStatus,
   mapDbRefundStatus,
+  mapDbReturnStatus,
   parseEstimateDayRange,
   parsePrice,
 } from "./home/utils";
@@ -96,7 +97,23 @@ export function HomeClient({ products }: { products: Product[] }) {
   const buildMockOrder = (
     overrides: Omit<
       Order,
-      "itemTotal" | "taxAmount" | "total" | "dbId" | "isPaid" | "refundStatus" | "refundReason" | "refundAdminNote" | "refundAmount" | "refundRequestedAt" | "refundProcessedAt"
+      | "itemTotal"
+      | "taxAmount"
+      | "total"
+      | "dbId"
+      | "isPaid"
+      | "refundStatus"
+      | "refundReason"
+      | "refundAdminNote"
+      | "refundAmount"
+      | "refundRequestedAt"
+      | "refundProcessedAt"
+      | "returnStatus"
+      | "returnReason"
+      | "returnAdminNote"
+      | "returnRequestedAt"
+      | "returnPorterTrackingUrl"
+      | "returnReceivedAt"
     > & { deliveryCharge: number; discount: number }
   ): Order | null => {
     if (overrides.items.length === 0) return null;
@@ -116,6 +133,12 @@ export function HomeClient({ products }: { products: Product[] }) {
       refundAmount: null,
       refundRequestedAt: null,
       refundProcessedAt: null,
+      returnStatus: "none",
+      returnReason: null,
+      returnAdminNote: null,
+      returnRequestedAt: null,
+      returnPorterTrackingUrl: null,
+      returnReceivedAt: null,
       itemTotal,
       taxAmount: 0,
       total: itemTotal + overrides.deliveryCharge - overrides.discount,
@@ -987,6 +1010,12 @@ export function HomeClient({ products }: { products: Product[] }) {
           refundAmount: number | null;
           refundRequestedAt: number | null;
           refundProcessedAt: number | null;
+          returnStatus: string;
+          returnReason: string | null;
+          returnAdminNote: string | null;
+          returnRequestedAt: number | null;
+          returnPorterTrackingUrl: string | null;
+          returnReceivedAt: number | null;
         }>;
       };
 
@@ -1054,6 +1083,12 @@ export function HomeClient({ products }: { products: Product[] }) {
             refundAmount: dbOrder.refundAmount,
             refundRequestedAt: dbOrder.refundRequestedAt,
             refundProcessedAt: dbOrder.refundProcessedAt,
+            returnStatus: mapDbReturnStatus(dbOrder.returnStatus),
+            returnReason: dbOrder.returnReason,
+            returnAdminNote: dbOrder.returnAdminNote,
+            returnRequestedAt: dbOrder.returnRequestedAt,
+            returnPorterTrackingUrl: dbOrder.returnPorterTrackingUrl,
+            returnReceivedAt: dbOrder.returnReceivedAt,
             statusNote:
               status === "delivered"
                 ? "Your order was delivered"
@@ -1101,6 +1136,22 @@ export function HomeClient({ products }: { products: Product[] }) {
     }
   };
 
+  // Mirrors the addresses effect above: orders were previously only ever
+  // refreshed from an explicit action (opening "My Orders", a fresh login,
+  // after a refund/cancel). That missed the session-restore-on-page-refresh
+  // path — if "My Orders" was the persisted view, isOrdersPanelOpen gets
+  // restored directly (see the sessionStorage-restore effect above) without
+  // going through openOrdersList, so the real orders never got fetched and
+  // the customer saw stale demo/empty state despite having a valid session.
+  useEffect(() => {
+    // Synchronizing from the isAuthenticated flag (an external system —
+    // the server-side session), not a plain derived-state update — same
+    // justification as the addresses effect above.
+    /* eslint-disable-next-line react-hooks/set-state-in-effect */
+    if (isAuthenticated) void refreshOrders();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated]);
+
   const openOrdersList = () => {
     setSelectedProduct(null);
     setViewedOrderId(null);
@@ -1122,36 +1173,38 @@ export function HomeClient({ products }: { products: Product[] }) {
     setIsCartOpen(true);
   };
 
-  const [isRequestingRefund, setIsRequestingRefund] = useState(false);
-  const [refundRequestError, setRefundRequestError] = useState<string | null>(null);
+  const [isRequestingReturn, setIsRequestingReturn] = useState(false);
+  const [returnRequestError, setReturnRequestError] = useState<string | null>(null);
 
   /**
-   * Customer-initiated refund request — see app/api/orders/[id]/refund for
-   * the server side. Refetches this phone's orders on success so the just-
-   * updated refundStatus (and the admin's eventual approve/reject) shows up
-   * without a full page reload.
+   * Customer-initiated product return — see app/api/orders/[id]/return for
+   * the server side. This only starts the physical return (admin approve
+   * -> pickup -> received); the refund itself is requested automatically
+   * once the admin confirms the item is back at the warehouse. Refetches
+   * this phone's orders on success so the just-updated returnStatus shows
+   * up without a full page reload.
    */
-  const requestRefund = async (order: Order, reason: string) => {
-    if (!isAuthenticated || isRequestingRefund) return;
+  const requestReturn = async (order: Order, reason: string) => {
+    if (!isAuthenticated || isRequestingReturn) return;
 
-    setIsRequestingRefund(true);
-    setRefundRequestError(null);
+    setIsRequestingReturn(true);
+    setReturnRequestError(null);
     try {
-      const response = await fetch(`/api/orders/${order.dbId}/refund`, {
+      const response = await fetch(`/api/orders/${order.dbId}/return`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ reason }),
       });
       const data = (await response.json().catch(() => ({}))) as { error?: string };
       if (!response.ok) {
-        setRefundRequestError(data.error ?? "Could not submit the refund request.");
+        setReturnRequestError(data.error ?? "Could not submit the return request.");
         return;
       }
       await refreshOrders();
     } catch {
-      setRefundRequestError("Could not submit the refund request. Check your connection and try again.");
+      setReturnRequestError("Could not submit the return request. Check your connection and try again.");
     } finally {
-      setIsRequestingRefund(false);
+      setIsRequestingReturn(false);
     }
   };
 
@@ -1161,7 +1214,7 @@ export function HomeClient({ products }: { products: Product[] }) {
   /**
    * Customer-initiated order cancellation — see app/api/orders/[id]/cancel.
    * A paid order's refund is requested automatically server-side as part of
-   * this, so (unlike requestRefund above) there's no separate reason step.
+   * this, so (unlike requestReturn above) there's no separate reason step.
    */
   const cancelOrder = async (order: Order) => {
     if (!isAuthenticated || isCancellingOrder) return;
@@ -2082,9 +2135,9 @@ export function HomeClient({ products }: { products: Product[] }) {
               setViewedOrderId(null);
               setIsOrdersPanelOpen(true);
             }}
-            onRequestRefund={(reason) => requestRefund(viewedOrder, reason)}
-            isRequestingRefund={isRequestingRefund}
-            refundRequestError={refundRequestError}
+            onRequestReturn={(reason) => requestReturn(viewedOrder, reason)}
+            isRequestingReturn={isRequestingReturn}
+            returnRequestError={returnRequestError}
             onCancelOrder={() => cancelOrder(viewedOrder)}
             isCancellingOrder={isCancellingOrder}
             cancelOrderError={cancelOrderError}

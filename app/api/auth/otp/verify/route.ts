@@ -21,13 +21,20 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => null);
   const phone = normalizeCustomerPhone(body?.phone);
   const otp = typeof body?.otp === "string" ? body.otp.trim() : "";
-  if (!isValidCustomerPhone(phone) || !/^\d{6}$/.test(otp)) {
-    return NextResponse.json({ error: "A valid phone number and 6-digit OTP are required." }, { status: 400 });
+  if (!isValidCustomerPhone(phone) || !/^\d{4}$/.test(otp)) {
+    return NextResponse.json({ error: "A valid phone number and 4-digit OTP are required." }, { status: 400 });
   }
 
   try {
+    // Phone-based limiting always applies. IP-based is additional
+    // defense-in-depth, applied only when getClientIp() returns a
+    // trustworthy address — never a shared placeholder every caller would
+    // collide under in direct-exposure mode.
     await assertOtpRateLimit(`verify:phone:${phone}`, 10, 15 * 60 * 1000);
-    await assertOtpRateLimit(`verify:ip:${getClientIp(request)}`, 30, 15 * 60 * 1000);
+    const ip = getClientIp(request);
+    if (ip) {
+      await assertOtpRateLimit(`verify:ip:${ip}`, 30, 15 * 60 * 1000);
+    }
   } catch (error) {
     if (error instanceof OtpRateLimitUnavailableError) {
       return NextResponse.json({ error: "OTP service is temporarily unavailable." }, { status: 503 });

@@ -2,6 +2,17 @@ import { prisma } from "@/lib/db";
 import { requestRefund } from "@/lib/order-refund-state";
 import type { OrderStatus } from "@prisma/client";
 
+// The customer-facing name for each status the Activity log ever records —
+// mirrors the STATUS_OPTIONS labels in the admin dropdown
+// (app/admin/(dashboard)/orders/[id]/page.tsx) so the log reads the same
+// friendly name shown elsewhere, instead of the raw DB enum value.
+export const ORDER_STATUS_LABELS: Partial<Record<OrderStatus, string>> = {
+  PACKED: "Preparing",
+  OUT_FOR_DELIVERY: "Out for Delivery",
+  DELIVERED: "Delivered",
+  CANCELLED: "Cancelled",
+};
+
 export function mapPorterStatusToOrderStatus(raw: string): OrderStatus | null {
   const value = raw.toLowerCase().trim();
   if (value.includes("cancel")) return "CANCELLED";
@@ -27,7 +38,7 @@ export async function cancelAdminOrderBeforeDispatch(orderId: string, adminNote:
     });
     if (claim.count !== 1) return { cancelled: false, refundRequested: false };
     const order = await tx.order.findUniqueOrThrow({ where: { id: orderId } });
-    await tx.orderEvent.create({ data: { orderId, type: "STATUS_CHANGE", message: `Status changed to CANCELLED${adminNote ? ` — ${adminNote}` : ""}` } });
+    await tx.orderEvent.create({ data: { orderId, type: "STATUS_CHANGE", message: `Status changed to ${ORDER_STATUS_LABELS.CANCELLED}${adminNote ? ` — ${adminNote}` : ""}` } });
     let refundRequested = false;
     if (order.paymentStatus === "PAID" && order.refundStatus === "NONE") {
       const result = await requestRefund(orderId, "Order cancelled by admin", tx);
@@ -53,7 +64,7 @@ export async function applyPorterStatus(orderId: string, rawStatus: string) {
       data: { status: mapped },
     });
     if (transitioned.count === 1) {
-      await tx.orderEvent.create({ data: { orderId, type: "STATUS_CHANGE", message: `Status changed to ${mapped} (Porter status "${rawStatus}")` } });
+      await tx.orderEvent.create({ data: { orderId, type: "STATUS_CHANGE", message: `Status changed to ${ORDER_STATUS_LABELS[mapped] ?? mapped} (Porter status "${rawStatus}")` } });
     }
     return { mappedStatus: mapped, transitioned: transitioned.count === 1 };
   });

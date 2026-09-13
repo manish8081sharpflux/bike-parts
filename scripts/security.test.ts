@@ -7,7 +7,9 @@ import {
   validateAdminSessionSecret,
   verifyAdminSessionToken,
 } from "@/lib/auth/admin-session";
+import { assertOtpRateLimit, OtpRateLimitError } from "@/lib/auth/otp-rate-limit";
 import { assertAdminLoginRateLimit } from "@/lib/security/admin-login";
+import { enforceApiRateLimit } from "@/lib/security/api-protection";
 import { getClientIp } from "@/lib/security/client-ip";
 import { buildContentSecurityPolicy, buildStaticSecurityHeaders } from "@/lib/security/headers";
 import { generateNonce } from "@/lib/security/nonce";
@@ -253,7 +255,19 @@ test("D: an invalid TRUST_PROXY_HEADERS value fails readiness", () => {
   }
 });
 
-test("E: with proxy trust disabled, spoofed forwarding headers are never used for rate-limit identity", () => {
+test("E: with TRUST_PROXY_HEADERS=false, spoofed forwarding headers are never used for rate-limit identity", () => {
+  Object.assign(process.env, { NODE_ENV: "production" });
+  process.env.TRUST_PROXY_HEADERS = "false";
+  const spoofed = new Headers({
+    "x-forwarded-for": "1.2.3.4",
+    "x-real-ip": "1.2.3.4",
+    "cf-connecting-ip": "1.2.3.4",
+  });
+  // Explicit null, not a placeholder string — see getClientIp's contract.
+  assert.equal(getClientIp({ headers: spoofed }), null);
+});
+
+test("F: with TRUST_PROXY_HEADERS unset, spoofed forwarding headers are never used for rate-limit identity", () => {
   Object.assign(process.env, { NODE_ENV: "production" });
   delete process.env.TRUST_PROXY_HEADERS;
   const spoofed = new Headers({
@@ -261,11 +275,10 @@ test("E: with proxy trust disabled, spoofed forwarding headers are never used fo
     "x-real-ip": "1.2.3.4",
     "cf-connecting-ip": "1.2.3.4",
   });
-  const ip = getClientIp({ headers: spoofed });
-  assert.notEqual(ip, "1.2.3.4");
+  assert.equal(getClientIp({ headers: spoofed }), null);
 });
 
-test("F: with proxy trust enabled, the documented header precedence (CF-Connecting-IP > X-Forwarded-For > X-Real-IP) applies", () => {
+test("G: with TRUST_PROXY_HEADERS=true, the documented header precedence (CF-Connecting-IP > X-Forwarded-For > X-Real-IP) applies", () => {
   Object.assign(process.env, { NODE_ENV: "production" });
   process.env.TRUST_PROXY_HEADERS = "true";
 
@@ -278,6 +291,78 @@ test("F: with proxy trust enabled, the documented header precedence (CF-Connecti
     "1.1.1.1"
   );
   assert.equal(getClientIp({ headers: new Headers({ "x-real-ip": "2.2.2.2" }) }), "2.2.2.2");
+  // No headers at all, even with trust enabled: still null, never a placeholder.
+  assert.equal(getClientIp({ headers: new Headers() }), null);
+});
+
+// H/I/J deliberately do NOT set NODE_ENV=production: that would also make
+// the underlying Redis-backed limiter fail closed with no REDIS_URL
+// configured (see "fails closed in production..." above), which is a
+// different, already-covered concern. These tests are about how the
+// higher-level functions handle an explicit `ip: null` — exactly the value
+// getClientIp() returns in direct-exposure mode (proven by E/F above) —
+// not about re-deriving it under a specific NODE_ENV.
+test("H: direct-exposure mode (ip: null) never creates a shared *:ip:<placeholder> bucket — an attacker's admin-login attempts don't block a different admin", async () => {
+  const noTrustworthyIp = null;
+
+  // "Attacker" hammers their own account past its 5/15min email limit — this
+  // must not consume any shared IP-keyed bucket, because there isn't one.
+  for (let i = 0; i < 5; i++) await assertAdminLoginRateLimit("attacker@example.com", noTrustworthyIp);
+  await assert.rejects(() => assertAdminLoginRateLimit("attacker@example.com", noTrustworthyIp), RateLimitExceededError);
+
+  // A different admin, whose request happens to carry the identical spoofed
+  // header (nothing to distinguish them on IP alone), must be unaffected.
+  await assert.doesNotReject(() => assertAdminLoginRateLimit("legit-admin@example.com", noTrustworthyIp));
+});
+
+test("I: OTP phone-based limiting still fully protects with no trustworthy client IP, and doesn't cross-block other phones", async () => {
+  // Mirrors app/api/auth/otp/send/route.ts exactly: phone bucket always
+  // applied; IP bucket only when getClientIp() returns non-null (here,
+  // simulated directly as null — the direct-exposure-mode value).
+  const sendOnce = async (phone: string, ip: string | null) => {
+    await assertOtpRateLimit(`send:phone:${phone}`, 3, 15 * 60 * 1000);
+    if (ip) await assertOtpRateLimit(`send:ip:${ip}`, 10, 15 * 60 * 1000);
+  };
+
+  const attackerPhone = "9000000001";
+  for (let i = 0; i < 3; i++) await sendOnce(attackerPhone, null);
+  await assert.rejects(() => sendOnce(attackerPhone, null), OtpRateLimitError, "the attacker's own phone limit still applies");
+
+  // A different phone, from a request bearing the identical spoofed header
+  // (i.e. still no trustworthy IP), is completely unaffected — there is no
+  // shared IP bucket to exhaust.
+  await assert.doesNotReject(() => sendOnce("9000000002", null));
+});
+
+test("J: authenticated routes rate-limit by user identity independently of client IP (enforceApiRateLimit)", async () => {
+  // A request with no forwarded-IP headers at all — getClientIp() would
+  // return null for it regardless of trust mode, so this exercises exactly
+  // the "no trustworthy IP" path through the real function signature.
+  const requestWithNoIpHeaders = new Request("https://example.com/api/checkout");
+  const policy = { limit: 2, windowMs: 15 * 60_000 };
+
+  assert.equal(await enforceApiRateLimit(requestWithNoIpHeaders, "test-scope-user", policy, "user-a"), null);
+  assert.equal(await enforceApiRateLimit(requestWithNoIpHeaders, "test-scope-user", policy, "user-a"), null);
+  const blocked = await enforceApiRateLimit(requestWithNoIpHeaders, "test-scope-user", policy, "user-a");
+  assert.equal(blocked?.status, 429);
+
+  // A different authenticated user, identical request shape, is unaffected.
+  const otherUser = await enforceApiRateLimit(requestWithNoIpHeaders, "test-scope-user", policy, "user-b");
+  assert.equal(otherUser, null);
+});
+
+test("K: trusted-proxy mode still provides genuine per-IP isolation once a real IP is available", async () => {
+  const policy = { limit: 2, windowMs: 15 * 60_000 };
+  const requestFrom = (ip: string) => new Request("https://example.com/api/checkout", { headers: { "x-forwarded-for": ip } });
+
+  assert.equal(await enforceApiRateLimit(requestFrom("4.4.4.4"), "test-scope-ip", policy), null);
+  assert.equal(await enforceApiRateLimit(requestFrom("4.4.4.4"), "test-scope-ip", policy), null);
+  const blocked = await enforceApiRateLimit(requestFrom("4.4.4.4"), "test-scope-ip", policy);
+  assert.equal(blocked?.status, 429);
+
+  // A genuinely different IP is isolated from the blocked one.
+  const otherIp = await enforceApiRateLimit(requestFrom("5.5.5.5"), "test-scope-ip", policy);
+  assert.equal(otherIp, null);
 });
 
 test("Meilisearch absent is optional and does not fail overall readiness (PostgreSQL fallback)", () => {

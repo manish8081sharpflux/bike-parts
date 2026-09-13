@@ -56,6 +56,26 @@ enum RefundStatus {
   REFUNDED
 }
 
+// Tracks a customer-initiated product return end to end — the physical
+// reverse-logistics side, independent of RefundStatus above (the money
+// side). A return only becomes requestable once an order is DELIVERED.
+// REQUESTED -> admin decides APPROVED or REJECTED. APPROVED -> admin
+// dispatches a reverse Porter pickup (PICKUP_SCHEDULED), which transitions
+// to PICKED_UP once Porter reports the item collected. RECEIVED is set once
+// the admin confirms the item is physically back at the warehouse — at that
+// point the existing refund flow (see order-refund-state.ts) is
+// auto-triggered, so approving/paying out the refund reuses the same
+// tested Razorpay code path a cancellation refund does.
+enum ReturnStatus {
+  NONE
+  REQUESTED
+  REJECTED
+  APPROVED
+  PICKUP_SCHEDULED
+  PICKED_UP
+  RECEIVED
+}
+
 enum WebhookProcessingStatus {
   PROCESSING
   PROCESSED
@@ -232,6 +252,18 @@ model Order {
   refundReconciliationRequired Boolean @default(false)
   refundRequestedAt DateTime?
   refundProcessedAt DateTime?
+  // Product return lifecycle — see ReturnStatus. returnPorterOrderId/Status/
+  // TrackingUrl track the reverse pickup shipment, kept separate from the
+  // forward-delivery porter* fields above since a delivered order that's
+  // now being returned needs both trails visible independently.
+  returnStatus            ReturnStatus @default(NONE)
+  returnReason            String?
+  returnAdminNote         String?
+  returnRequestedAt       DateTime?
+  returnPorterOrderId     String?
+  returnPorterStatus      String?
+  returnPorterTrackingUrl String?
+  returnReceivedAt        DateTime?
   // True while this order is currently holding a stock reservation (decremented
   // from ProductStock at checkout, not yet released back). Flipped back to
   // false once the reservation is released — payment failed/expired, or the

@@ -20,8 +20,15 @@ export async function POST(request: Request) {
   }
 
   try {
-    await assertOtpRateLimit(`send:phone:${phone}`, 3, 15 * 60 * 1000);
-    await assertOtpRateLimit(`send:ip:${getClientIp(request)}`, 10, 15 * 60 * 1000);
+    // Phone-based limiting always applies. IP-based is additional
+    // defense-in-depth, applied only when getClientIp() returns a
+    // trustworthy address — never a shared placeholder every caller would
+    // collide under in direct-exposure mode.
+    await assertOtpRateLimit(`send:phone:${phone}`, 20, 10 * 60 * 1000);
+    const ip = getClientIp(request);
+    if (ip) {
+      await assertOtpRateLimit(`send:ip:${ip}`, 30, 15 * 60 * 1000);
+    }
   } catch (error) {
     if (error instanceof OtpRateLimitUnavailableError) {
       return NextResponse.json({ error: "OTP service is temporarily unavailable." }, { status: 503 });

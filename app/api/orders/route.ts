@@ -46,6 +46,12 @@ export async function GET() {
       refundAmount: order.refundAmount === null ? null : Number(order.refundAmount),
       refundRequestedAt: order.refundRequestedAt ? order.refundRequestedAt.getTime() : null,
       refundProcessedAt: order.refundProcessedAt ? order.refundProcessedAt.getTime() : null,
+      returnStatus: order.returnStatus,
+      returnReason: order.returnReason,
+      returnAdminNote: order.returnAdminNote,
+      returnRequestedAt: order.returnRequestedAt ? order.returnRequestedAt.getTime() : null,
+      returnPorterTrackingUrl: order.returnPorterTrackingUrl,
+      returnReceivedAt: order.returnReceivedAt ? order.returnReceivedAt.getTime() : null,
       items: order.items.map((item) => ({
         name: item.productName,
         image: item.productImage,

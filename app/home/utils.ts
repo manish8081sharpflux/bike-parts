@@ -4,7 +4,7 @@
 // monolithic home-client.tsx.
 import { MapPin } from "lucide-react";
 import type { Product } from "@/lib/storefront-catalog";
-import type { Address, Order, OrderEventEntry, OrderStatus, RefundStatus } from "./types";
+import type { Address, Order, OrderEventEntry, OrderStatus, RefundStatus, ReturnStatus } from "./types";
 import { addressIcons, riderRoster, stepIndexForStatus } from "./constants";
 import { parsePrice, formatPrice } from "./format";
 
@@ -83,6 +83,17 @@ export const mapDbRefundStatus = (status: string): RefundStatus => {
   if (status === "PROCESSING") return "processing";
   if (status === "REJECTED") return "rejected";
   if (status === "REFUNDED") return "refunded";
+  return "none";
+};
+
+/** Maps the backend's ReturnStatus enum to this UI's lowercased vocabulary. */
+export const mapDbReturnStatus = (status: string): ReturnStatus => {
+  if (status === "REQUESTED") return "requested";
+  if (status === "REJECTED") return "rejected";
+  if (status === "APPROVED") return "approved";
+  if (status === "PICKUP_SCHEDULED") return "pickup_scheduled";
+  if (status === "PICKED_UP") return "picked_up";
+  if (status === "RECEIVED") return "received";
   return "none";
 };
 

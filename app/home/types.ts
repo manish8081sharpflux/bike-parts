@@ -80,6 +80,16 @@ export type OrderEventEntry = { type: string; message: string; createdAt: number
 /** Mirrors the DB's RefundStatus enum, lowercased to match this file's other status vocabularies. */
 export type RefundStatus = "none" | "requested" | "processing" | "rejected" | "refunded";
 
+/** Mirrors the DB's ReturnStatus enum, lowercased to match this file's other status vocabularies. */
+export type ReturnStatus =
+  | "none"
+  | "requested"
+  | "rejected"
+  | "approved"
+  | "pickup_scheduled"
+  | "picked_up"
+  | "received";
+
 export type Order = {
   id: string;
   /** Full, untruncated DB id — `id` above is shortened for display, this is what refund/reorder calls to the server actually address. */
@@ -105,6 +115,12 @@ export type Order = {
   refundAmount: number | null;
   refundRequestedAt: number | null;
   refundProcessedAt: number | null;
+  returnStatus: ReturnStatus;
+  returnReason: string | null;
+  returnAdminNote: string | null;
+  returnRequestedAt: number | null;
+  returnPorterTrackingUrl: string | null;
+  returnReceivedAt: number | null;
 };
 
 /**

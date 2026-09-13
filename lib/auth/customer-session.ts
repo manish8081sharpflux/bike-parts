@@ -43,7 +43,7 @@ function hashSessionToken(value: string) {
 }
 
 export function generateOtp() {
-  return crypto.randomInt(100000, 1000000).toString();
+  return crypto.randomInt(1000, 10000).toString();
 }
 
 export async function issueCustomerOtp(phone: string) {
@@ -52,10 +52,6 @@ export async function issueCustomerOtp(phone: string) {
     void cleanupExpiredCustomerAuthData().catch(() => {});
   }
   const otp = generateOtp();
-  const existing = await prisma.customerOtpChallenge.findUnique({ where: { phone } });
-  if (existing && Date.now() - existing.createdAt.getTime() < 30_000) {
-    throw new Error("Please wait before requesting another OTP.");
-  }
   await prisma.customerOtpChallenge.upsert({
     where: { phone },
     update: {

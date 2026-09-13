@@ -21,7 +21,17 @@ import {
   applyPorterStatus,
   cancelAdminOrderBeforeDispatch,
   claimPorterDispatch,
+  ORDER_STATUS_LABELS,
 } from "@/lib/order-delivery-state";
+import {
+  approveReturn,
+  applyReturnPorterStatus,
+  claimReturnPickupDispatch,
+  completeReturnPickupDispatch,
+  failReturnPickupDispatch,
+  markReturnReceived,
+  rejectReturn,
+} from "@/lib/order-return-state";
 import type { OrderStatus } from "@prisma/client";
 
 const ORDER_STATUSES: OrderStatus[] = [
@@ -86,7 +96,7 @@ export async function updateOrderStatusAction(orderId: string, formData: FormDat
       data: {
         orderId,
         type: "STATUS_CHANGE",
-        message: `Status changed to ${statusRaw}${adminNote ? ` — ${adminNote}` : ""}`,
+        message: `Status changed to ${ORDER_STATUS_LABELS[statusRaw as OrderStatus] ?? statusRaw}${adminNote ? ` — ${adminNote}` : ""}`,
       },
     });
   });
@@ -304,4 +314,162 @@ export async function rejectRefundAction(orderId: string, formData: FormData) {
   revalidatePath(`/admin/orders/${orderId}`);
   revalidatePath("/admin/orders");
   revalidatePath("/admin");
+}
+
+/** Approves a pending return request — next step for the admin is dispatching a reverse pickup. */
+export async function approveReturnAction(orderId: string, formData: FormData) {
+  await requireAdminAction();
+  const adminNote = String(formData.get("returnAdminNote") ?? "").trim();
+
+  const approved = await approveReturn(orderId, adminNote);
+  if (!approved) redirect(`/admin/orders/${orderId}?error=${encodeURIComponent("This order has no pending return request.")}`);
+
+  revalidatePath(`/admin/orders/${orderId}`);
+  revalidatePath("/admin/orders");
+}
+
+/** Rejects a pending return request — no pickup happens, just records why for the customer to see. */
+export async function rejectReturnAction(orderId: string, formData: FormData) {
+  await requireAdminAction();
+  const adminNote = String(formData.get("returnAdminNote") ?? "").trim();
+  if (!adminNote) {
+    redirect(`/admin/orders/${orderId}?error=${encodeURIComponent("A note is required so the customer knows why.")}`);
+  }
+
+  const rejected = await rejectReturn(orderId, adminNote);
+  if (!rejected) redirect(`/admin/orders/${orderId}?error=${encodeURIComponent("This order has no pending return request.")}`);
+
+  revalidatePath(`/admin/orders/${orderId}`);
+  revalidatePath("/admin/orders");
+}
+
+/**
+ * Dispatches a reverse Porter pickup for an approved return — the customer's
+ * delivery address becomes the pickup point and the warehouse becomes the
+ * drop, reusing the exact same createPorterDelivery call the forward
+ * dispatch uses (see dispatchOrderAction above), just with the two
+ * addresses swapped.
+ */
+export async function dispatchReturnPickupAction(orderId: string) {
+  await requireAdminAction();
+  let claimed = false;
+
+  try {
+    const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
+
+    if (order.returnStatus !== "APPROVED") {
+      throw new Error("This return has not been approved yet.");
+    }
+    if (order.returnPorterOrderId) {
+      throw new Error("A pickup has already been dispatched for this return.");
+    }
+    assertPorterConfigured();
+    if (
+      process.env.NODE_ENV === "production" &&
+      (!process.env.WAREHOUSE_CONTACT_NAME ||
+        !process.env.WAREHOUSE_PHONE ||
+        !process.env.WAREHOUSE_ADDRESS_LINE1 ||
+        !process.env.WAREHOUSE_CITY ||
+        !/^\d{6}$/.test(process.env.WAREHOUSE_PINCODE ?? ""))
+    ) {
+      throw new Error("Production warehouse configuration is incomplete.");
+    }
+
+    const address = (order.deliveryAddress ?? {}) as DeliveryAddress;
+    const line1 = [address.flatNo, address.floor, address.area].filter(Boolean).join(", ");
+    const pickupPhone = address.phone || order.customerPhone;
+    if (!order.customerName.trim() || !/^\d{10}$/.test(pickupPhone) || !line1 || !address.city || !/^\d{6}$/.test(address.pincode ?? "")) {
+      throw new Error("Delivery address is incomplete. Contact name, phone, address, city, and pincode are required.");
+    }
+
+    if (!(await claimReturnPickupDispatch(orderId))) {
+      throw new Error("A pickup has already been dispatched for this return.");
+    }
+    claimed = true;
+
+    const result = await createPorterDelivery({
+      orderId: `return-${order.id}`,
+      pickup: {
+        contactName: address.contactName || order.customerName,
+        contactPhone: pickupPhone,
+        line1,
+        line2: address.landmark ?? "",
+        city: address.city ?? "",
+        pincode: address.pincode ?? "",
+      },
+      drop: {
+        contactName: process.env.WAREHOUSE_CONTACT_NAME!,
+        contactPhone: process.env.WAREHOUSE_PHONE!,
+        line1: process.env.WAREHOUSE_ADDRESS_LINE1!,
+        city: process.env.WAREHOUSE_CITY!,
+        pincode: process.env.WAREHOUSE_PINCODE!,
+      },
+      amount: Number(order.amount),
+      instructions: `Return pickup for Deep Automobiles order ${order.id}`,
+    });
+
+    if (!result.porterOrderId) {
+      throw new PorterRequestError("Porter returned no delivery identifier; reconciliation is required.", { uncertain: true });
+    }
+
+    if (!(await completeReturnPickupDispatch(orderId, result))) {
+      throw new Error("Return pickup claim is no longer current.");
+    }
+  } catch (error) {
+    console.error("[porter] Return pickup dispatch failed for order", orderId, error);
+    if (claimed) {
+      const failureMessage = error instanceof Error ? error.message : "Could not dispatch this return pickup.";
+      await failReturnPickupDispatch(orderId, failureMessage).catch((dbError) => {
+        console.error("[porter] Also failed to record return-dispatch-failed state for order", orderId, dbError);
+      });
+    }
+    const message = error instanceof Error ? error.message : "Could not dispatch this return pickup.";
+    redirect(`/admin/orders/${orderId}?error=${encodeURIComponent(message)}`);
+  }
+
+  revalidatePath(`/admin/orders/${orderId}`);
+  revalidatePath("/admin/orders");
+}
+
+/** Polls Porter for the reverse-pickup shipment's latest status and applies it (moving PICKUP_SCHEDULED to PICKED_UP once collected). */
+export async function refreshReturnPickupStatusAction(orderId: string) {
+  await requireAdminAction();
+
+  try {
+    const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
+    if (!order.returnPorterOrderId || order.returnPorterOrderId === "DISPATCHING") {
+      throw new Error("This return has not been dispatched for pickup yet.");
+    }
+
+    const { status } = await getPorterDeliveryStatus(order.returnPorterOrderId);
+    await applyReturnPorterStatus(orderId, status);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not refresh pickup status.";
+    console.error("[porter] Return pickup status refresh failed for order", orderId, error);
+    redirect(`/admin/orders/${orderId}?error=${encodeURIComponent(message)}`);
+  }
+
+  revalidatePath(`/admin/orders/${orderId}`);
+  revalidatePath("/admin/orders");
+}
+
+/**
+ * Admin confirms the returned item is physically back at the warehouse —
+ * the manual fallback for when Porter's own tracking doesn't reliably
+ * report pickup/delivery. Automatically requests the refund (see
+ * markReturnReceived), which is what makes the existing Refund card's
+ * Approve/Reject buttons appear below.
+ */
+export async function markReturnReceivedAction(orderId: string, formData: FormData) {
+  await requireAdminAction();
+  const adminNote = String(formData.get("returnAdminNote") ?? "").trim();
+
+  const received = await markReturnReceived(orderId, adminNote);
+  if (!received) {
+    redirect(`/admin/orders/${orderId}?error=${encodeURIComponent("This return is not ready to be marked received.")}`);
+  }
+
+  revalidatePath(`/admin/orders/${orderId}`);
+  revalidatePath("/admin/orders");
+  redirect(`/admin/orders/${orderId}?refundReady=1`);
 }
