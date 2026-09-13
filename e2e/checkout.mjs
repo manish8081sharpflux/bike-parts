@@ -6,6 +6,8 @@
 //
 // Usage: `pnpm dev` in one terminal, then `node e2e/checkout.mjs` in another.
 import { chromium } from "@playwright/test";
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 
 const BASE_URL = process.env.E2E_BASE_URL ?? "http://localhost:3000";
 const shot = async (page, name) => {
@@ -15,7 +17,10 @@ const shot = async (page, name) => {
 async function main() {
   const browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  page.setDefaultTimeout(30000);
   page.on("pageerror", (err) => console.log("[pageerror]", err.message));
+  let addressId;
+  try {
 
   await page.goto(BASE_URL, { waitUntil: "networkidle" });
   await page.waitForTimeout(1000); // let React finish hydrating before the first click
@@ -51,20 +56,39 @@ async function main() {
     for (const [index, digit] of [...otpData.developmentOtp].entries()) {
       await otpInputs.nth(index).fill(digit);
     }
+  const loginResponsePromise = page.waitForResponse(
+    (r) => r.url().includes("/api/auth/otp/verify") && r.request().method() === "POST"
+  );
   await page.getByRole("button", { name: "Verify & Continue" }).click();
-  await page.waitForTimeout(500);
+  assert.equal((await loginResponsePromise).status(), 200);
+  const flatNo = `E2E-${randomUUID()}`;
+  const addressResponse = await page.request.post(`${BASE_URL}/api/addresses`, {
+    data: {
+      label: "Home", contactName: "E2E Customer", phone: "9876500099",
+      flatNo, floor: "", area: "E2E Test Area", landmark: "",
+      city: "Pune", state: "Maharashtra", pincode: "411001",
+    },
+  });
+  assert.equal(addressResponse.status(), 201, await addressResponse.text());
+  addressId = (await addressResponse.json()).address.id;
+  // Reload to fetch the saved address into the storefront's address state.
+  await page.reload({ waitUntil: "networkidle" });
+  await page.getByText("item", { exact: false }).first().click();
 
   await page.getByRole("button", { name: "Proceed to Checkout" }).click();
   await page.waitForTimeout(500);
   await shot(page, "address-panel");
 
-  const addressCard = page.locator('[role="button"]', { hasText: "H.No. 102" }).first();
+  const addressCard = page.locator('[role="button"]', { hasText: flatNo });
+  await addressCard.waitFor();
   const checkoutResponsePromise = page.waitForResponse(
     (r) => r.url().includes("/api/checkout") && r.request().method() === "POST",
     { timeout: 15000 }
   );
   await addressCard.click();
   const checkoutRes = await checkoutResponsePromise;
+  assert.equal(checkoutRes.request().postDataJSON().addressId, addressId);
+  assert.ok(checkoutRes.ok(), await checkoutRes.text());
   console.log(">>> POST /api/checkout:", checkoutRes.status(), await checkoutRes.text());
 
   await page.waitForSelector('iframe[src*="razorpay"]', { timeout: 15000 });
@@ -148,7 +172,16 @@ async function main() {
 
   await page.waitForTimeout(1500);
   await shot(page, "post-payment");
-  await browser.close();
+  } finally {
+    try {
+      if (addressId) {
+        const cleanup = await page.request.delete(`${BASE_URL}/api/addresses/${addressId}`);
+        assert.ok(cleanup.ok(), `Address cleanup failed: ${cleanup.status()}`);
+      }
+    } finally {
+      await browser.close();
+    }
+  }
 }
 
 main().catch((err) => {

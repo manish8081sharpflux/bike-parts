@@ -103,6 +103,26 @@ test("a customer can create, list, and edit only their own address", async () =>
   assert.equal(patched.address.city, "Nashik");
 });
 
+test("concurrent first-address POSTs both return 201 with exactly one default", async () => {
+  const cookie = await login(phone());
+  const responses = await Promise.all(["A-1", "B-1"].map((flatNo) =>
+    request("/api/addresses", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify(validAddress({ flatNo })),
+    })
+  ));
+  for (const response of responses) {
+    assert.equal(response.status, 201, await response.text());
+  }
+  const listRes = await request("/api/addresses", { headers: { Cookie: cookie } });
+  assert.equal(listRes.status, 200);
+  const { addresses } = await listRes.json();
+  assert.equal(addresses.length, 2);
+  assert.equal(addresses.filter((row: { isDefault: boolean }) => row.isDefault).length, 1);
+  assert.deepEqual(addresses.map((row: { flatNo: string }) => row.flatNo).sort(), ["A-1", "B-1"]);
+});
+
 test("cross-user address read/edit/delete are all rejected", async () => {
   const cookieA = await login(phone());
   const cookieB = await login(phone());

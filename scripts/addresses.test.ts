@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test, { after } from "node:test";
 import { prisma } from "@/lib/db";
+import { Prisma } from "@prisma/client";
 import {
   createAddressForUser,
   deleteAddressForUser,
@@ -66,6 +67,53 @@ test("createAddressForUser assigns userId server-side and makes the first addres
   if (!second.ok) return;
   addressIds.push(second.address.id);
   assert.equal(second.address.isDefault, false);
+});
+
+test("concurrent first-address creation creates both rows and exactly one default", async (t) => {
+  const user = await testUser("concurrent-create");
+  // Make both real DB reads finish before either insert, reliably exercising
+  // the partial-index conflict rather than depending on scheduler timing.
+  const originalCount = prisma.address.count;
+  const count = originalCount.bind(prisma.address);
+  t.after(() => { prisma.address.count = originalCount; });
+  let reads = 0;
+  let release!: () => void;
+  const barrier = new Promise<void>((resolve) => { release = resolve; });
+  prisma.address.count = (async (...args: Parameters<typeof count>) => {
+    const result = await count(...args);
+    if (++reads === 2) release();
+    await barrier;
+    return result;
+  }) as typeof originalCount;
+  const [a, b] = await Promise.all([
+    createAddressForUser(user.id, validInput({ flatNo: "A-1", area: "Area A" })),
+    createAddressForUser(user.id, validInput({ flatNo: "B-1", area: "Area B" })),
+  ]);
+  assert.equal(a.ok, true);
+  assert.equal(b.ok, true);
+  const rows = await prisma.address.findMany({ where: { userId: user.id } });
+  addressIds.push(...rows.map((row) => row.id));
+  assert.equal(rows.length, 2);
+  assert.equal(rows.filter((row) => row.isDefault).length, 1);
+  assert.deepEqual(rows.map((row) => row.flatNo).sort(), ["A-1", "B-1"]);
+});
+
+test("address creation propagates unrelated unique and database errors without retrying", async (t) => {
+  const user = await testUser("create-errors");
+  const originalCreate = prisma.address.create;
+  t.after(() => { prisma.address.create = originalCreate; });
+  for (const error of [
+    new Prisma.PrismaClientKnownRequestError("unrelated unique conflict", {
+      code: "P2002", clientVersion: Prisma.prismaVersion.client,
+      meta: { modelName: "Address", target: ["id"] },
+    }),
+    new Error("database unavailable"),
+  ]) {
+    let calls = 0;
+    prisma.address.create = () => { calls++; throw error; };
+    await assert.rejects(createAddressForUser(user.id, validInput()), (caught) => caught === error);
+    assert.equal(calls, 1);
+  }
 });
 
 test("createAddressForUser rejects invalid input without touching the database", async () => {

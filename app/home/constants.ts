@@ -1,5 +1,5 @@
 // Static/derived data for the customer storefront — brand & category
-// catalogs, price/sort filter options, seed addresses, order-status display
+// catalogs, price/sort filter options, address display options, order-status display
 // metadata, etc. Extracted from the former monolithic home-client.tsx.
 import type { LucideIcon } from "lucide-react";
 import { Bike, Building2, CheckCircle2, CircleDot, Clock, Cog, Disc3, Droplet, Filter, Gauge, Home as HomeIcon, MapPin, Plus, Search, Star, Store, Truck, Wrench, X, XCircle, Zap } from "lucide-react";
@@ -454,32 +454,8 @@ export const sortOptions = [
 export type SortOption = (typeof sortOptions)[number]["value"];
 
 
-// Fixture addresses for local development only, so the storefront has
-// something to show before logging in and calling /api/addresses. Production
-// must never show fake customer addresses — see Fix 6 — so this array is
-// forced empty outside development and the UI always loads the customer's
-// real saved addresses from the server once authenticated.
-const devDemoAddresses: Address[] = [
-  {
-    id: "dev-home",
-    label: "Home",
-    flatNo: "H.No. 102",
-    floor: "",
-    area: "Boring Road",
-    landmark: "Patna Junction",
-    city: "Patna",
-    pincode: "800001",
-    contactName: "Dev Tester",
-    phone: "9999999999",
-    isDefault: true,
-    deliveryEstimate: "Delivery in 2-4 days",
-    availabilityNote: "All parts available at this location",
-    availabilityOk: true,
-  },
-];
-
-export const initialAddresses: Address[] =
-  process.env.NODE_ENV === "production" ? [] : devDemoAddresses;
+// Saved customer addresses load from /api/addresses after authentication.
+export const initialAddresses: Address[] = [];
 
 
 export const addressIcons: Record<string, { icon: LucideIcon; className: string }> = {

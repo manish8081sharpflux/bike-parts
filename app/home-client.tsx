@@ -143,9 +143,7 @@ export function HomeClient({ products }: { products: Product[] }) {
   // that isn't in the live catalog is silently dropped rather than crashing.
   const initialOrders: Order[] = useMemo(() => {
     const homeAddress = initialAddresses[0];
-    // No dev fixture address in production (initialAddresses is forced
-    // empty there) — skip the decorative sample orders entirely rather than
-    // build one around a fake address. Real orders load via refreshOrders.
+    // No fixture addresses: real orders load via refreshOrders.
     if (!homeAddress) return [];
     const resolvedItems = (lines: Array<CartLine | null>) =>
       lines.filter((line): line is CartLine => line !== null);

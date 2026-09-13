@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db";
 import { validateAddressInput } from "@/lib/address-validation";
-import type { Address } from "@prisma/client";
+import { Prisma, type Address } from "@prisma/client";
 
 export type AddressDto = Omit<Address, "userId">;
 
@@ -21,16 +21,30 @@ export async function createAddressForUser(userId: string, raw: unknown) {
   const validated = validateAddressInput(raw);
   if (!validated.ok) return { ok: false as const, error: validated.error };
 
-  // First address a customer ever saves becomes their default automatically
-  // — see Fix 6 spec section 5. Counting rather than reading the default
-  // flag directly keeps this correct even if a previous default was deleted
-  // without a replacement being promoted.
+  // The partial unique index arbitrates simultaneous first-address creates.
   const existingCount = await prisma.address.count({ where: { userId } });
 
-  const address = await prisma.address.create({
-    data: { ...validated.data, userId, isDefault: existingCount === 0 },
-  });
-  return { ok: true as const, address };
+  try {
+    const address = await prisma.address.create({
+      data: { ...validated.data, userId, isDefault: existingCount === 0 },
+    });
+    return { ok: true as const, address };
+  } catch (error) {
+    const target = error instanceof Prisma.PrismaClientKnownRequestError
+      && error.code === "P2002" && error.meta?.modelName === "Address"
+      ? error.meta.target : undefined;
+    // PostgreSQL reports the indexed field; also accept the exact index name.
+    const defaultConflict = target === "Address_userId_isDefault_unique"
+      || (Array.isArray(target) && target.length === 1 && target[0] === "userId");
+    if (existingCount !== 0 || !defaultConflict) throw error;
+
+    // The winning insert has committed. Retry only this insert as non-default;
+    // unrelated unique constraints and database failures must still propagate.
+    const address = await prisma.address.create({
+      data: { ...validated.data, userId, isDefault: false },
+    });
+    return { ok: true as const, address };
+  }
 }
 
 class AddressNotFoundError extends Error {}
