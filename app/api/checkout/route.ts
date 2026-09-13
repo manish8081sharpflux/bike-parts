@@ -92,7 +92,9 @@ export async function POST(request: Request) {
   // Self-healing cleanup for abandoned checkouts — see releaseExpiredReservations's
   // own comment for why this runs here instead of on a schedule. Best-effort:
   // never let a hiccup here block a real checkout.
-  await releaseExpiredReservations().catch(() => {});
+  await releaseExpiredReservations().catch((error) => {
+    console.error("[checkout] Expired-reservation sweep failed:", error);
+  });
 
   // Resolve every requested item against the real catalog server-side —
   // never trust the client's submitted name/price/image. This matters for

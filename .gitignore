@@ -30,8 +30,11 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# env files (can opt-in for committing if needed) — .env.example is the
+# template new deployments copy from (see README.md), so it must stay
+# tracked; everything else matching .env* (real secrets) stays ignored.
 .env*
+!.env.example
 
 # vercel
 .vercel
@@ -49,3 +52,9 @@ e2e/_shots/
 infra/meilisearch/meilisearch.exe
 infra/meilisearch/data.ms/
 infra/meilisearch/*.log
+
+# local PostgreSQL dumps (see docs/backup-and-restore.md) — contains real
+# customer/order data, must never be committed
+/dumps/
+*.dump
+*.sql.gz

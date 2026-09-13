@@ -184,6 +184,7 @@ export async function dispatchOrderAction(orderId: string) {
       await tx.orderEvent.create({ data: { orderId, type: "PORTER_DISPATCHED", message: `Dispatched via Porter (order ${result.porterOrderId})` } });
     });
   } catch (error) {
+    console.error("[porter] Dispatch failed for order", orderId, error);
     if (claimed) {
       const failureMessage = error instanceof Error ? error.message : "Could not dispatch this order.";
       const uncertain = error instanceof PorterRequestError && error.uncertain;
@@ -220,6 +221,7 @@ export async function refreshDeliveryStatusAction(orderId: string) {
     await applyPorterStatus(orderId, status);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not refresh delivery status.";
+    console.error("[porter] Delivery status refresh failed for order", orderId, error);
     redirect(`/admin/orders/${orderId}?error=${encodeURIComponent(message)}`);
   }
 
@@ -258,10 +260,15 @@ export async function approveRefundAction(orderId: string, formData: FormData) {
     await markRefundSucceeded(orderId, refund.id);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not process this refund.";
+    console.error("[refund] Approval failed for order", orderId, error);
     if (error instanceof Error && /timeout|timed out|network|socket|ECONNRESET|ETIMEDOUT/i.test(error.message)) {
-      await markRefundNeedsReconciliation(orderId, message).catch(() => {});
+      await markRefundNeedsReconciliation(orderId, message).catch((dbError) => {
+        console.error("[refund] Also failed to record reconciliation-needed state for order", orderId, dbError);
+      });
     } else if (message !== "This order has no pending refund request.") {
-      await markRefundFailed(orderId, message).catch(() => {});
+      await markRefundFailed(orderId, message).catch((dbError) => {
+        console.error("[refund] Also failed to record refund-failed state for order", orderId, dbError);
+      });
     }
     redirect(`/admin/orders/${orderId}?error=${encodeURIComponent(message)}`);
   }

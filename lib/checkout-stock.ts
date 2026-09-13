@@ -148,6 +148,12 @@ export async function releaseExpiredReservations() {
       id,
       "STOCK_RELEASED",
       "Stock reservation expired and was released — payment was never completed."
-    ).catch(() => {});
+    ).catch((error) => {
+      // Best-effort sweep — one order's release failing must never block the
+      // checkout request that triggered this sweep. But silently losing this
+      // meant a stuck reservation could go unnoticed indefinitely; logging it
+      // costs nothing and gives ops something to find.
+      console.error("[checkout-stock] Failed to release expired reservation for order", id, error);
+    });
   }
 }

@@ -50,13 +50,16 @@ export async function POST(request: Request) {
   }
 
   if (!valid) {
+    console.error("[checkout/verify] Signature verification failed for order", order.id);
     await prisma.orderEvent.create({
       data: {
         orderId: order.id,
         type: "PAYMENT_VERIFICATION_FAILED",
         message: "Client payment signature verification failed; order remains active for webhook or cancellation reconciliation.",
       },
-    }).catch(() => {});
+    }).catch((error) => {
+      console.error("[checkout/verify] Also failed to record the verification-failure event for order", order.id, error);
+    });
     return NextResponse.json({ error: "Payment signature verification failed." }, { status: 400 });
   }
 

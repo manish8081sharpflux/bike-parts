@@ -77,6 +77,7 @@ export async function POST(request: Request) {
   try {
     valid = verifyRazorpayWebhookSignature({ rawBody, signature });
   } catch (error) {
+    console.error("[webhook][razorpay] Signature verification threw (check RAZORPAY_WEBHOOK_SECRET):", error);
     const message = error instanceof Error ? error.message : "Webhook is not configured.";
     return NextResponse.json({ error: message }, { status: 500 });
   }
@@ -118,6 +119,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ received: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Webhook processing failed.";
+    console.error("[webhook][razorpay] Event processing failed for", payload.event, "—", message, error);
     const markedFailed = await markWebhookFailed(claim.id, claim.attempts, message);
     if (!markedFailed) {
       return NextResponse.json({ error: "Webhook claim is no longer current." }, { status: 409 });

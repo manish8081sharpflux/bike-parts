@@ -16,11 +16,23 @@ function getRedis() {
   const url = process.env.REDIS_URL;
   if (!url) return null;
   const state = globalThis as typeof globalThis & { applicationRateLimitRedis?: Redis };
-  state.applicationRateLimitRedis ??= new Redis(url, {
-    lazyConnect: true,
-    enableOfflineQueue: false,
-    maxRetriesPerRequest: 1,
-  });
+  if (!state.applicationRateLimitRedis) {
+    const client = new Redis(url, {
+      lazyConnect: true,
+      enableOfflineQueue: false,
+      maxRetriesPerRequest: 1,
+    });
+    // ioredis is an EventEmitter — a background connection error (dropped
+    // connection, DNS blip, auth failure on reconnect) with no 'error'
+    // listener is an unhandled EventEmitter error, which crashes the whole
+    // Node process, not just this request. This listener is the difference
+    // between "rate limiting degrades" and "the entire app goes down"
+    // whenever Redis has a transient outage.
+    client.on("error", (error) => {
+      console.error("[security] Redis client error (rate limiting only — app continues):", error.message);
+    });
+    state.applicationRateLimitRedis = client;
+  }
   return state.applicationRateLimitRedis;
 }
 
