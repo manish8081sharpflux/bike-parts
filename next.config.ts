@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { PRODUCT_FORM_BODY_LIMIT_BYTES } from "./lib/storage/image-validation";
 
 // Product images served by <Image> can come from our configured R2 public
 // URL (see lib/storage/config.ts) in addition to same-origin /uploads-dev
@@ -30,11 +31,9 @@ const nextConfig: NextConfig = {
   allowedDevOrigins: ["192.168.0.101"],
   experimental: {
     serverActions: {
-      // Default is 1MB, which the admin product form's image uploads (main
-      // photo + several gallery photos, each up to 8MB per admin-products.ts)
-      // blow through immediately. 32MB covers a handful of full-size photos
-      // in one submit with headroom.
-      bodySizeLimit: "32mb",
+      // One main image plus five gallery uploads total at most 24 MB,
+      // leaving 8 MB for multipart overhead and other product fields.
+      bodySizeLimit: PRODUCT_FORM_BODY_LIMIT_BYTES,
     },
   },
   // Explicit (empty) config tells Next "yes, the webpack config below is

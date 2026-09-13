@@ -4,6 +4,8 @@ import { prisma } from "@/lib/db";
 import {
   MAX_GALLERY_IMAGES,
   MAX_IMAGE_BYTES,
+  MAX_IMAGE_MB,
+  PRODUCT_FORM_BODY_LIMIT_BYTES,
   assertGalleryCountWithinLimit,
   validateImageUpload,
 } from "@/lib/storage/image-validation";
@@ -17,6 +19,7 @@ import {
   type StorageBackend,
 } from "@/lib/storage/product-images";
 import { createProduct, deleteProduct, updateProduct } from "@/lib/actions/admin-products-core";
+import nextConfig from "../next.config";
 
 // --- Minimal, valid magic-byte signatures (padded to the 12-byte minimum the
 // signature check reads) — enough to pass validateImageUpload without a real
@@ -58,6 +61,18 @@ test("validateImageUpload rejects an oversized file", () => {
     JPEG_BYTES
   );
   assert.equal(result.ok, false);
+  if (!result.ok) assert.ok(result.error.includes(`${MAX_IMAGE_MB}MB`));
+});
+
+test("valid image bytes exactly at the size limit are accepted", () => {
+  const bytes = new Uint8Array(MAX_IMAGE_BYTES);
+  bytes.set(JPEG_BYTES);
+  assert.equal(validateImageUpload({ name: "limit.jpg", type: "image/jpeg", size: bytes.length }, bytes).ok, true);
+});
+
+test("maximum image payload leaves multipart headroom under the configured action limit", () => {
+  assert.equal(nextConfig.experimental?.serverActions?.bodySizeLimit, PRODUCT_FORM_BODY_LIMIT_BYTES);
+  assert.ok((1 + MAX_GALLERY_IMAGES) * MAX_IMAGE_BYTES <= PRODUCT_FORM_BODY_LIMIT_BYTES * 0.75);
 });
 
 test("validateImageUpload rejects SVG outright", () => {
@@ -93,6 +108,11 @@ test("deriveOwnedObjectKey only matches our own configured base URL", () => {
   assert.equal(deriveOwnedObjectKey("https://evil.example.com/products/x.jpg", base), null);
   assert.equal(deriveOwnedObjectKey(`${base}/../../etc/passwd`, base), null);
   assert.equal(deriveOwnedObjectKey("/uploads/legacy.jpg", base), null);
+  for (const key of ["backups/db.jpg", "private/file.jpg", "avatars/user.jpg", "products/../private/a.jpg", "/products/a.jpg"]) {
+    assert.equal(deriveOwnedObjectKey(`${base}/${key}`, base), null, key);
+  }
+  assert.equal(deriveOwnedObjectKey(`${base}.evil.example/products/a.jpg`, base), null);
+  assert.equal(deriveOwnedObjectKey(`${base}/catalog/products/a.jpg`, `${base}/catalog`), "products/a.jpg");
 });
 
 // --- Fake in-memory storage backend for lifecycle tests — no real S3/R2
@@ -105,11 +125,12 @@ function createFakeBackend() {
 
   const backend: StorageBackend = {
     async put(ext, bytes) {
+      putCount++;
       if (failNextPut) {
         failNextPut = false;
         throw new Error("simulated upload failure");
       }
-      const key = `fake/${++putCount}${ext}`;
+      const key = `products/${putCount}${ext}`;
       store.set(key, bytes);
       return { key, url: `https://fake-bucket.example.com/${key}` };
     },
@@ -118,8 +139,7 @@ function createFakeBackend() {
       deletedKeys.push(key);
     },
     ownedKeyForUrl(url) {
-      const prefix = "https://fake-bucket.example.com/";
-      return url.startsWith(prefix) ? url.slice(prefix.length) : null;
+      return deriveOwnedObjectKey(url, "https://fake-bucket.example.com");
     },
   };
 
@@ -127,6 +147,7 @@ function createFakeBackend() {
     backend,
     store,
     deletedKeys,
+    get putCount() { return putCount; },
     failNextPut: () => {
       failNextPut = true;
     },
@@ -151,6 +172,16 @@ test("uploadProductImage: returns null for an empty field", async (t) => {
 
   assert.equal(await uploadProductImage(null), null);
   assert.equal(await uploadProductImage(""), null);
+  assert.equal(await uploadProductImage(new File([], "")), null);
+  assert.equal(fake.putCount, 0);
+});
+
+test("uploadProductImage rejects an actual zero-byte File before calling storage", async (t) => {
+  const fake = createFakeBackend();
+  setStorageBackendForTests(fake.backend);
+  t.after(() => setStorageBackendForTests(null));
+  await assert.rejects(() => uploadProductImage(new File([], "empty.jpg", { type: "image/jpeg" })), /empty/i);
+  assert.equal(fake.putCount, 0);
 });
 
 test("uploadProductImages: a bad file mid-batch cleans up the earlier successful uploads in that batch", async (t) => {
@@ -186,15 +217,26 @@ test("deleteProductImageByKey never throws, even when the backend fails", async 
 
 test("deleteOwnedProductImageByUrl never deletes a URL outside our own base URL", async (t) => {
   const fake = createFakeBackend();
-  fake.store.set("fake/1.jpg", JPEG_BYTES);
+  fake.store.set("products/1.jpg", JPEG_BYTES);
   setStorageBackendForTests(fake.backend);
   t.after(() => setStorageBackendForTests(null));
 
-  await deleteOwnedProductImageByUrl("https://someone-elses-bucket.example.com/fake/1.jpg");
-  assert.equal(fake.store.has("fake/1.jpg"), true, "an unrelated host's URL must never be deleted");
+  await deleteOwnedProductImageByUrl("https://someone-elses-bucket.example.com/products/1.jpg");
+  assert.equal(fake.store.has("products/1.jpg"), true, "an unrelated host's URL must never be deleted");
 
-  await deleteOwnedProductImageByUrl("https://fake-bucket.example.com/fake/1.jpg");
-  assert.equal(fake.store.has("fake/1.jpg"), false, "our own bucket's URL should be deleted");
+  await deleteOwnedProductImageByUrl("https://fake-bucket.example.com/products/1.jpg");
+  assert.equal(fake.store.has("products/1.jpg"), false, "our own product image should be deleted");
+});
+
+test("deleteOwnedProductImageByUrl never calls remove for same-domain non-product paths", async (t) => {
+  const fake = createFakeBackend();
+  setStorageBackendForTests(fake.backend);
+  t.after(() => setStorageBackendForTests(null));
+  for (const key of ["backups/db.jpg", "private/file.jpg", "avatars/user.jpg", "products/../private/file.jpg"]) {
+    await deleteOwnedProductImageByUrl(`https://fake-bucket.example.com/${key}`);
+  }
+  await deleteOwnedProductImageByUrl("/uploads/legacy.jpg");
+  assert.deepEqual(fake.deletedKeys, []);
 });
 
 // --- Full create/update/delete lifecycle, against the real dev database
@@ -214,6 +256,31 @@ function productForm(overrides: Record<string, string> = {}): FormData {
   if (overrides.imageUrl !== undefined) formData.set("imageUrl", overrides.imageUrl);
   if (overrides.images !== undefined) formData.set("images", overrides.images);
   return formData;
+}
+
+for (const uploadedCount of [0, 2, MAX_GALLERY_IMAGES]) {
+  test(`gallery limits cover ${uploadedCount} uploaded files combined with URLs, excluding main image`, async (t) => {
+    const fake = createFakeBackend();
+    setStorageBackendForTests(fake.backend);
+    t.after(() => setStorageBackendForTests(null));
+    const urls = Array.from({ length: MAX_GALLERY_IMAGES - uploadedCount }, (_, i) => `https://external.example/${i}.jpg`);
+    const form = productForm({ images: urls.join("\n") });
+    form.set("imageFile", file("main.jpg", "image/jpeg", JPEG_BYTES));
+    for (let i = 0; i < uploadedCount; i++) form.append("imageFiles", file(`${i}.jpg`, "image/jpeg", JPEG_BYTES));
+    const listing = await createProduct(form);
+    productIds.push(listing.id);
+    assert.equal(listing.images.length, MAX_GALLERY_IMAGES);
+    assert.ok(listing.imageUrl);
+
+    // One additional gallery entry must fail before any further storage writes,
+    // for both create and update, whether it is a URL or a file.
+    if (uploadedCount === 0) form.set("images", [...urls, "https://external.example/extra.jpg"].join("\n"));
+    else form.append("imageFiles", file("extra.jpg", "image/jpeg", JPEG_BYTES));
+    const putsBefore = fake.putCount;
+    await assert.rejects(() => createProduct(form), /gallery images/);
+    await assert.rejects(() => updateProduct(listing.id, form), /gallery images/);
+    assert.equal(fake.putCount, putsBefore);
+  });
 }
 
 test("createProduct: successful upload stores the fake backend's URL on the product", async (t) => {

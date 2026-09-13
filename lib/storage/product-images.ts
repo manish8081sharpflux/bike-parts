@@ -10,7 +10,7 @@
  *  - files are validated (size, MIME allowlist, magic-byte signature)
  *    before anything is uploaded
  *  - deletion only ever targets a key we generated ourselves, or a URL
- *    proven (by prefix match) to live under our own configured base URL —
+ *    proven to live under products/ at our own configured base URL —
  *    an arbitrary client-supplied URL can never be deleted
  *  - deletes are always best-effort: a storage failure here must never be
  *    allowed to block a product create/update/delete from completing
@@ -112,7 +112,7 @@ function resolveBackend(): StorageBackend {
 
 /** Reads and validates one uploaded file, then stores it. Returns null if the field was left empty. */
 export async function uploadProductImage(file: FormDataEntryValue | null): Promise<UploadedImage | null> {
-  if (!(file instanceof File) || file.size === 0 || !file.name) {
+  if (!(file instanceof File) || !file.name) {
     return null;
   }
 
@@ -129,7 +129,7 @@ export async function uploadProductImage(file: FormDataEntryValue | null): Promi
   return backend.put(validated.ext, bytes, file.type);
 }
 
-/** Uploads every non-empty file under a (possibly multi-value) form field, in order. */
+/** Validates and uploads every selected file under a multi-value form field, in order. */
 export async function uploadProductImages(files: FormDataEntryValue[]): Promise<UploadedImage[]> {
   const uploaded: UploadedImage[] = [];
   try {
@@ -161,7 +161,7 @@ export async function deleteProductImagesByKey(keys: string[]): Promise<void> {
 
 /**
  * Best-effort delete of a *stored* image URL, but only if that URL is
- * proven to belong to us — either our configured R2 public base URL, or
+ * proven to belong to us — either products/ at our R2 public base URL, or
  * our own local-dev upload path. Anything else (an externally supplied
  * URL, or a legacy /uploads/... path from before Fix 7) is left untouched.
  */

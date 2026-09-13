@@ -15,10 +15,10 @@ export function generateProductImageKey(ext: string): string {
 
 /**
  * Derives the object key from a URL only when it's guaranteed to sit under
- * our own configured public base URL — this is what lets deletion work
+ * the products/ prefix of our configured public base URL — this lets deletion work
  * without a schema change (Fix 7 option B), and it's also what stops an
  * arbitrary externally-supplied URL from ever being deleted: anything that
- * doesn't start with our exact base URL comes back null and is left alone.
+ * outside that exact base and product prefix comes back null and is left alone.
  */
 export function deriveOwnedObjectKey(url: string, publicBaseUrl: string): string | null {
   const prefix = `${publicBaseUrl}/`;
@@ -26,7 +26,7 @@ export function deriveOwnedObjectKey(url: string, publicBaseUrl: string): string
     return null;
   }
   const key = url.slice(prefix.length);
-  if (!key || key.includes("..") || key.startsWith("/")) {
+  if (!key || !key.startsWith("products/") || key.includes("..") || key.startsWith("/")) {
     return null;
   }
   return key;

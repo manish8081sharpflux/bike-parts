@@ -6,6 +6,7 @@ import { useFormStatus } from "react-dom";
 import Link from "next/link";
 import { Check, ChevronDown, Loader2, Package, Save } from "lucide-react";
 import { BRAND_MODELS } from "@/lib/bike-brand-models";
+import { MAX_GALLERY_IMAGES, MAX_IMAGE_MB } from "@/lib/storage/image-validation";
 import { SUBCATEGORIES_BY_CATEGORY } from "@/lib/product-subcategories";
 import { parsePackageContent, type Specification, type CompatibleVehicle } from "@/lib/products/product-details";
 
@@ -257,12 +258,12 @@ export function ProductForm({ action, defaultValues: v = {}, submitLabel }: {
     <Section title="Product Images" description="Use a clear main image and additional angles of the same product.">
       <Field label="Main Image URL" name="imageUrl" placeholder="/assets/... or https://..." defaultValue={v.imageUrl ?? ""} />
       <Field label="Or Upload Main Image" name="imageFile" type="file" accept="image/jpeg,image/png,image/webp" />
-      <p className="text-xs text-zinc-500">A main image upload replaces the URL. JPG, PNG, or WEBP, maximum 8 MB.</p>
+      <p className="text-xs text-zinc-500">A main image upload replaces the URL. JPG, PNG, or WEBP, maximum {MAX_IMAGE_MB} MB per image.</p>
       <label className="flex flex-col gap-1 text-sm font-semibold">Gallery Images / Additional Photos
         <textarea name="images" defaultValue={v.images?.join("\n") ?? ""} rows={2} placeholder="One image URL per line" className={inputClass} />
       </label>
       <Field label="Upload Additional Photos" name="imageFiles" type="file" multiple accept="image/jpeg,image/png,image/webp" />
-      <p className="text-xs text-zinc-500">Gallery uploads are added to the URLs above. Maximum 8 images per product.</p>
+      <p className="text-xs text-zinc-500">Gallery uploads are added to the URLs above. Up to {MAX_GALLERY_IMAGES} gallery images total, including URLs and uploads, plus one separate main image. Maximum {MAX_IMAGE_MB} MB per upload.</p>
     </Section>
     <Section title="Search Tags">
       <label className="flex flex-col gap-1 text-sm font-semibold text-zinc-700">Keywords

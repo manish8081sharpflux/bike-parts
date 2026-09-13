@@ -5,8 +5,12 @@
  * bytes) are all checked here before anything is uploaded to storage.
  */
 
-export const MAX_IMAGE_BYTES = 8 * 1024 * 1024; // 8MB — matches the limit already documented in the admin product form.
-export const MAX_GALLERY_IMAGES = 8;
+export const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
+export const MAX_IMAGE_MB = MAX_IMAGE_BYTES / (1024 * 1024);
+// Gallery URLs and uploads combined; the one main image is separate.
+export const MAX_GALLERY_IMAGES = 5;
+// At most 24 MB of image bytes, leaving 8 MB for multipart and other fields.
+export const PRODUCT_FORM_BODY_LIMIT_BYTES = 32 * 1024 * 1024;
 
 export const ALLOWED_IMAGE_TYPES: Record<string, string> = {
   "image/jpeg": ".jpg",
@@ -60,7 +64,7 @@ export function validateImageUpload(
     return { ok: false, error: `"${file.name}" is empty.` };
   }
   if (file.size > MAX_IMAGE_BYTES) {
-    return { ok: false, error: `"${file.name}" is larger than 8MB — please upload a smaller image.` };
+    return { ok: false, error: `"${file.name}" is larger than ${MAX_IMAGE_MB}MB — please upload a smaller image.` };
   }
 
   const ext = ALLOWED_IMAGE_TYPES[file.type];
