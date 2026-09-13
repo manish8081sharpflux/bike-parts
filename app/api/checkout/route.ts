@@ -16,9 +16,8 @@ type CheckoutItem = {
 };
 
 type CheckoutBody = {
-  customerName: string;
   bikeLabel?: string;
-  deliveryAddress: Record<string, unknown>;
+  addressId: string;
   items: CheckoutItem[];
 };
 
@@ -42,33 +41,48 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
   }
 
-  if (!body.customerName || !Array.isArray(body.items) || body.items.length === 0) {
+  if (!Array.isArray(body.items) || body.items.length === 0) {
     return NextResponse.json(
-      { error: "customerName and at least one item are required." },
+      { error: "At least one item is required." },
       { status: 400 }
     );
   }
 
-  // deliveryAddress was previously accepted as-is with zero validation —
-  // an order could be created with a missing city/pincode and only fail
-  // confusingly later, at Porter dispatch time, long after payment.
-  const address = body.deliveryAddress;
-  const addressCity = typeof address?.city === "string" ? address.city.trim() : "";
-  const addressPincode = typeof address?.pincode === "string" ? address.pincode.trim() : "";
-  const addressContactName =
-    typeof address?.contactName === "string" ? address.contactName.trim() : "";
-  const addressLine =
-    typeof address?.flatNo === "string" && address.flatNo.trim()
-      ? address.flatNo.trim()
-      : typeof address?.area === "string"
-      ? address.area.trim()
-      : "";
-  if (!addressCity || !/^\d{6}$/.test(addressPincode) || !addressContactName || !addressLine) {
-    return NextResponse.json(
-      { error: "Delivery address is incomplete — contact name, a flat/area, city, and a 6-digit pincode are required." },
-      { status: 400 }
-    );
+  if (!body.addressId || typeof body.addressId !== "string") {
+    return NextResponse.json({ error: "A delivery address is required." }, { status: 400 });
   }
+
+  // The client sends only an addressId — never trust an address object from
+  // the request body. Loading by id *and* the current session's userId in
+  // one query (never findUnique by id alone) is what stops User B from
+  // checking out against User A's saved address just by guessing/reusing
+  // its id.
+  const savedAddress = await prisma.address.findFirst({
+    where: { id: body.addressId, userId: session.user.id },
+  });
+  if (!savedAddress) {
+    return NextResponse.json({ error: "Selected delivery address was not found." }, { status: 404 });
+  }
+
+  // Snapshot the address fields onto the order now, immutably — see
+  // Order.deliveryAddress. Orders never read the live Address row again
+  // after this, so editing or deleting the saved address later cannot
+  // change an already-placed order or what Porter dispatches with.
+  const deliveryAddressSnapshot = {
+    sourceAddressId: savedAddress.id,
+    label: savedAddress.label,
+    contactName: savedAddress.contactName,
+    phone: savedAddress.phone,
+    flatNo: savedAddress.flatNo,
+    floor: savedAddress.floor,
+    area: savedAddress.area,
+    landmark: savedAddress.landmark,
+    city: savedAddress.city,
+    state: savedAddress.state,
+    pincode: savedAddress.pincode,
+    latitude: savedAddress.latitude,
+    longitude: savedAddress.longitude,
+  };
 
   // Self-healing cleanup for abandoned checkouts — see releaseExpiredReservations's
   // own comment for why this runs here instead of on a schedule. Best-effort:
@@ -124,17 +138,17 @@ export async function POST(request: Request) {
       );
 
       const user = session.user;
-      if (body.customerName !== user.name) {
-        await tx.user.update({ where: { id: user.id }, data: { name: body.customerName } });
+      if (savedAddress.contactName !== user.name) {
+        await tx.user.update({ where: { id: user.id }, data: { name: savedAddress.contactName } });
       }
 
       return tx.order.create({
         data: {
           buyerId: user.id,
-          customerName: body.customerName,
+          customerName: savedAddress.contactName,
           customerPhone: user.phone!,
           bikeLabel: body.bikeLabel,
-          deliveryAddress: body.deliveryAddress as object,
+          deliveryAddress: deliveryAddressSnapshot,
           itemsTotal,
           taxAmount,
           deliveryCharge,

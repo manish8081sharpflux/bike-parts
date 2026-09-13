@@ -36,6 +36,11 @@ const ORDER_STATUSES: OrderStatus[] = [
 
 type DeliveryAddress = {
   contactName?: string;
+  // Delivery contact number, saved on the customer's Address row — may
+  // differ from the account phone (order.customerPhone) used for OTP login.
+  // Absent on orders placed before Fix 6, which is why every read of this
+  // falls back to order.customerPhone.
+  phone?: string;
   flatNo?: string;
   floor?: string;
   area?: string;
@@ -124,7 +129,13 @@ export async function dispatchOrderAction(orderId: string) {
 
     const address = (order.deliveryAddress ?? {}) as DeliveryAddress;
     const line1 = [address.flatNo, address.floor, address.area].filter(Boolean).join(", ");
-    if (!order.customerName.trim() || !/^\d{10}$/.test(order.customerPhone) || !line1 || !address.city || !/^\d{6}$/.test(address.pincode ?? "")) {
+    // The delivery contact may not be the account holder (e.g. an order sent
+    // to a shop or a relative's place), so Porter gets the address's own
+    // phone when the snapshot has one — falling back to the account phone
+    // only for orders placed before Fix 6, whose snapshot predates this
+    // field. Whichever number is chosen is the one validated here.
+    const dropPhone = address.phone || order.customerPhone;
+    if (!order.customerName.trim() || !/^\d{10}$/.test(dropPhone) || !line1 || !address.city || !/^\d{6}$/.test(address.pincode ?? "")) {
       throw new Error("Delivery address is incomplete. Contact name, phone, address, city, and pincode are required.");
     }
 
@@ -144,7 +155,7 @@ export async function dispatchOrderAction(orderId: string) {
       },
       drop: {
         contactName: address.contactName || order.customerName,
-        contactPhone: order.customerPhone,
+        contactPhone: dropPhone,
         line1,
         line2: address.landmark ?? "",
         city: address.city ?? "",

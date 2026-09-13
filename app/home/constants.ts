@@ -454,9 +454,14 @@ export const sortOptions = [
 export type SortOption = (typeof sortOptions)[number]["value"];
 
 
-export const initialAddresses: Address[] = [
+// Fixture addresses for local development only, so the storefront has
+// something to show before logging in and calling /api/addresses. Production
+// must never show fake customer addresses — see Fix 6 — so this array is
+// forced empty outside development and the UI always loads the customer's
+// real saved addresses from the server once authenticated.
+const devDemoAddresses: Address[] = [
   {
-    id: "home",
+    id: "dev-home",
     label: "Home",
     flatNo: "H.No. 102",
     floor: "",
@@ -464,41 +469,17 @@ export const initialAddresses: Address[] = [
     landmark: "Patna Junction",
     city: "Patna",
     pincode: "800001",
-    contactName: "Manish Prasad",
+    contactName: "Dev Tester",
+    phone: "9999999999",
     isDefault: true,
     deliveryEstimate: "Delivery in 2-4 days",
     availabilityNote: "All parts available at this location",
     availabilityOk: true,
   },
-  {
-    id: "office",
-    label: "Shop",
-    flatNo: "ASP Tower",
-    floor: "3rd",
-    area: "Frazer Road",
-    landmark: "",
-    city: "Patna",
-    pincode: "800001",
-    contactName: "Manish Prasad",
-    deliveryEstimate: "Delivery in 2-4 days",
-    availabilityNote: "All parts available at this location",
-    availabilityOk: true,
-  },
-  {
-    id: "other",
-    label: "Other",
-    flatNo: "Flat No. 5, Shanti Vihar",
-    floor: "",
-    area: "Kankarbagh",
-    landmark: "",
-    city: "Patna",
-    pincode: "800020",
-    contactName: "Manish Prasad",
-    deliveryEstimate: "Delivery in 3-5 days",
-    availabilityNote: "Some parts may take longer",
-    availabilityOk: false,
-  },
 ];
+
+export const initialAddresses: Address[] =
+  process.env.NODE_ENV === "production" ? [] : devDemoAddresses;
 
 
 export const addressIcons: Record<string, { icon: LucideIcon; className: string }> = {

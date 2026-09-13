@@ -73,6 +73,9 @@ export function AddressFormModal({
   initialAddress,
   onClose,
   onSave,
+  onDelete,
+  isSaving,
+  error,
 }: {
   initialAddress: Address | null;
   onClose: () => void;
@@ -85,7 +88,11 @@ export function AddressFormModal({
     city: string;
     pincode: string;
     contactName: string;
+    phone: string;
   }) => void;
+  onDelete?: (id: string) => void;
+  isSaving?: boolean;
+  error?: string | null;
 }) {
   const [label, setLabel] = useState(initialAddress?.label ?? "Home");
   const [flatNo, setFlatNo] = useState(initialAddress?.flatNo ?? "");
@@ -95,6 +102,7 @@ export function AddressFormModal({
   const [city, setCity] = useState(initialAddress?.city ?? "");
   const [pincode, setPincode] = useState(initialAddress?.pincode ?? "");
   const [contactName, setContactName] = useState(initialAddress?.contactName ?? "");
+  const [phone, setPhone] = useState(initialAddress?.phone ?? "");
   const [isLocating, setIsLocating] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [mapCenter, setMapCenter] = useState(DEFAULT_MAP_CENTER);
@@ -105,7 +113,8 @@ export function AddressFormModal({
     area.trim() !== "" &&
     city.trim() !== "" &&
     pincode.trim().length === 6 &&
-    contactName.trim() !== "";
+    contactName.trim() !== "" &&
+    /^\d{10}$/.test(phone.trim());
 
   const handleUseCurrentLocation = () => {
     if (!navigator.geolocation) {
@@ -170,6 +179,7 @@ export function AddressFormModal({
       city: city.trim(),
       pincode: pincode.trim(),
       contactName: contactName.trim(),
+      phone: phone.trim(),
     });
   };
 
@@ -326,14 +336,45 @@ export function AddressFormModal({
               />
             </label>
 
+            <label className="block">
+              <span className="mb-1 block text-xs font-bold text-zinc-600">
+                Delivery contact number *
+              </span>
+              <input
+                value={phone}
+                onChange={(event) => setPhone(event.target.value.replace(/\D/g, "").slice(0, 10))}
+                inputMode="numeric"
+                placeholder="10-digit mobile number"
+                className="h-11 w-full rounded-lg border border-zinc-200 px-3 text-sm outline-none transition focus:border-[#ff4b1f] focus:ring-2 focus:ring-[#ff4b1f]/15"
+              />
+            </label>
+
+            {error ? (
+              <p className="rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-600">
+                {error}
+              </p>
+            ) : null}
+
             <button
               type="button"
               onClick={handleSave}
-              disabled={!isValid}
+              disabled={!isValid || isSaving}
               className="flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-[#ff4b1f] text-base font-bold text-white shadow-sm shadow-orange-200 transition hover:bg-[#e8330e] disabled:cursor-not-allowed disabled:opacity-40"
             >
+              {isSaving ? <Loader2 className="size-4 animate-spin" /> : null}
               Save Address
             </button>
+
+            {initialAddress && onDelete ? (
+              <button
+                type="button"
+                onClick={() => onDelete(initialAddress.id)}
+                disabled={isSaving}
+                className="flex h-10 w-full items-center justify-center gap-2 rounded-lg text-sm font-bold text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Delete Address
+              </button>
+            ) : null}
           </div>
         </div>
       </div>
@@ -352,6 +393,7 @@ export function AddressPanel({
   onBack,
   onAddNew,
   onEdit,
+  onSetDefault,
 }: {
   isOpen: boolean;
   mode: "checkout" | "manage";
@@ -362,6 +404,7 @@ export function AddressPanel({
   onBack: () => void;
   onAddNew: () => void;
   onEdit: (id: string) => void;
+  onSetDefault?: (address: Address) => void;
 }) {
   if (!isOpen) {
     return null;
@@ -469,17 +512,32 @@ export function AddressPanel({
                         {secondary}
                       </p>
 
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onEdit(address.id);
-                        }}
-                        className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-zinc-50 px-2 py-0.5 text-[11px] font-bold text-zinc-500 transition hover:bg-[#fff0eb] hover:text-[#ff4b1f]"
-                      >
-                        <Pencil className="size-3" />
-                        Edit
-                      </button>
+                      <div className="mt-1.5 flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onEdit(address.id);
+                          }}
+                          className="inline-flex items-center gap-1 rounded-full bg-zinc-50 px-2 py-0.5 text-[11px] font-bold text-zinc-500 transition hover:bg-[#fff0eb] hover:text-[#ff4b1f]"
+                        >
+                          <Pencil className="size-3" />
+                          Edit
+                        </button>
+
+                        {!address.isDefault && onSetDefault ? (
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onSetDefault(address);
+                            }}
+                            className="inline-flex items-center gap-1 rounded-full bg-zinc-50 px-2 py-0.5 text-[11px] font-bold text-zinc-500 transition hover:bg-emerald-50 hover:text-emerald-600"
+                          >
+                            Set as default
+                          </button>
+                        ) : null}
+                      </div>
                     </div>
                   </div>
                 </div>

@@ -14,6 +14,7 @@
     "test:order-refund-state": "tsx --test scripts/order-refund-state.test.ts",
     "test:webhook-lifecycle": "tsx --test scripts/webhook-lifecycle.test.ts",
     "test:porter-state": "tsx --test scripts/porter-state.test.ts",
+    "test:addresses": "tsx --test scripts/addresses.test.ts scripts/addresses-http.test.ts",
     "reconcile:payments": "tsx scripts/reconcile-payments.ts",
     "reconcile:porter": "tsx scripts/reconcile-porter.ts",
     "meilisearch:up": "node scripts/start-meilisearch.mjs",

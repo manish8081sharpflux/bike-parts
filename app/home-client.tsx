@@ -143,6 +143,10 @@ export function HomeClient({ products }: { products: Product[] }) {
   // that isn't in the live catalog is silently dropped rather than crashing.
   const initialOrders: Order[] = useMemo(() => {
     const homeAddress = initialAddresses[0];
+    // No dev fixture address in production (initialAddresses is forced
+    // empty there) — skip the decorative sample orders entirely rather than
+    // build one around a fake address. Real orders load via refreshOrders.
+    if (!homeAddress) return [];
     const resolvedItems = (lines: Array<CartLine | null>) =>
       lines.filter((line): line is CartLine => line !== null);
 
@@ -488,7 +492,15 @@ export function HomeClient({ products }: { products: Product[] }) {
     }
   };
 
-  const handleSaveAddress = (values: {
+  const [isSavingAddress, setIsSavingAddress] = useState(false);
+  const [addressFormError, setAddressFormError] = useState<string | null>(null);
+
+  /**
+   * Address create/edit both go straight to the server — the address book is
+   * never authoritative on the client (see Fix 6). Ownership is derived from
+   * the session on the server; this only ever sends the form fields.
+   */
+  const handleSaveAddress = async (values: {
     label: string;
     flatNo: string;
     floor: string;
@@ -497,28 +509,86 @@ export function HomeClient({ products }: { products: Product[] }) {
     city: string;
     pincode: string;
     contactName: string;
+    phone: string;
   }) => {
-    if (editingAddressId) {
-      setAddresses((current) =>
-        current.map((address) =>
-          address.id === editingAddressId ? { ...address, ...values } : address
-        )
-      );
-      setSelectedAddressId(editingAddressId);
-    } else {
-      const newAddress: Address = {
-        id: `addr-${Date.now()}`,
-        ...values,
-        deliveryEstimate: "Delivery in 2-4 days",
-        availabilityNote: "All parts available at this location",
-        availabilityOk: true,
-      };
-      setAddresses((current) => [...current, newAddress]);
-      setSelectedAddressId(newAddress.id);
-    }
+    if (isSavingAddress) return;
+    setIsSavingAddress(true);
+    setAddressFormError(null);
+    try {
+      const response = editingAddressId
+        ? await fetch(`/api/addresses/${editingAddressId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(values),
+          })
+        : await fetch("/api/addresses", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(values),
+          });
 
-    setIsAddressFormOpen(false);
-    setEditingAddressId(null);
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setAddressFormError(data.error ?? "Could not save this address.");
+        return;
+      }
+
+      await refreshAddresses();
+      setSelectedAddressId(data.address?.id ?? editingAddressId ?? null);
+      setIsAddressFormOpen(false);
+      setEditingAddressId(null);
+    } catch {
+      setAddressFormError("Could not save this address. Check your connection and try again.");
+    } finally {
+      setIsSavingAddress(false);
+    }
+  };
+
+  const handleDeleteAddress = async (id: string) => {
+    if (isSavingAddress) return;
+    setIsSavingAddress(true);
+    setAddressFormError(null);
+    try {
+      const response = await fetch(`/api/addresses/${id}`, { method: "DELETE" });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setAddressFormError(data.error ?? "Could not delete this address.");
+        return;
+      }
+      await refreshAddresses();
+      setIsAddressFormOpen(false);
+      setEditingAddressId(null);
+    } catch {
+      setAddressFormError("Could not delete this address. Check your connection and try again.");
+    } finally {
+      setIsSavingAddress(false);
+    }
+  };
+
+  const handleSetDefaultAddress = async (address: Address) => {
+    if (isSavingAddress) return;
+    setIsSavingAddress(true);
+    try {
+      await fetch(`/api/addresses/${address.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          label: address.label,
+          flatNo: address.flatNo,
+          floor: address.floor,
+          area: address.area,
+          landmark: address.landmark,
+          city: address.city,
+          pincode: address.pincode,
+          contactName: address.contactName,
+          phone: address.phone,
+          isDefault: true,
+        }),
+      });
+      await refreshAddresses();
+    } finally {
+      setIsSavingAddress(false);
+    }
   };
 
   const refreshStock = async () => {
@@ -821,6 +891,78 @@ export function HomeClient({ products }: { products: Product[] }) {
     }
   };
 
+  /**
+   * Loads this customer's real saved addresses from the server — the only
+   * source of truth for the address book (see Fix 6: production never shows
+   * fake/demo addresses). deliveryEstimate/availabilityNote/availabilityOk
+   * aren't real columns on the Address model, just cosmetic copy the UI
+   * already expected on every Address value, so they're filled in with a
+   * fixed default here rather than threaded through the API.
+   */
+  const refreshAddresses = async () => {
+    try {
+      const response = await fetch("/api/addresses");
+      if (!response.ok) return;
+      const data = (await response.json()) as {
+        addresses: Array<{
+          id: string;
+          label: string | null;
+          contactName: string;
+          phone: string;
+          flatNo: string | null;
+          floor: string | null;
+          area: string;
+          landmark: string | null;
+          city: string;
+          pincode: string;
+          isDefault: boolean;
+        }>;
+      };
+
+      const mapped: Address[] = data.addresses.map((addr) => ({
+        id: addr.id,
+        label: addr.label ?? "Home",
+        flatNo: addr.flatNo ?? "",
+        floor: addr.floor ?? "",
+        area: addr.area,
+        landmark: addr.landmark ?? "",
+        city: addr.city,
+        pincode: addr.pincode,
+        contactName: addr.contactName,
+        phone: addr.phone,
+        isDefault: addr.isDefault,
+        deliveryEstimate: "Delivery in 2-4 days",
+        availabilityNote: "All parts available at this location",
+        availabilityOk: true,
+      }));
+
+      setAddresses(mapped);
+      setSelectedAddressId((current) => {
+        if (current && mapped.some((address) => address.id === current)) return current;
+        return mapped.find((address) => address.isDefault)?.id ?? mapped[0]?.id ?? null;
+      });
+    } catch {
+      // Best-effort — keep whatever address list is already shown on failure.
+    }
+  };
+
+  // Addresses are always the authenticated customer's own — load them fresh
+  // on login/session-restore and clear them on logout rather than ever
+  // reusing what an earlier signed-in customer on this device might have
+  // left in state.
+  useEffect(() => {
+    if (isAuthenticated) {
+      void refreshAddresses();
+      return;
+    }
+    // Clearing stale state on logout, not synchronizing from an external
+    // system — safe to disable for both calls below.
+    /* eslint-disable react-hooks/set-state-in-effect */
+    setAddresses([]);
+    setSelectedAddressId(null);
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, [isAuthenticated]);
+
   const refreshOrders = async () => {
     try {
       const response = await fetch("/api/orders");
@@ -944,6 +1086,7 @@ export function HomeClient({ products }: { products: Product[] }) {
               city: addr.city ?? "",
               pincode: addr.pincode ?? "",
               contactName: addr.contactName ?? "",
+              phone: addr.phone ?? "",
               deliveryEstimate,
               availabilityNote: addr.availabilityNote ?? "",
               availabilityOk: addr.availabilityOk ?? true,
@@ -1075,12 +1218,14 @@ export function HomeClient({ products }: { products: Product[] }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          customerName: address.contactName || "Customer",
           bikeLabel:
             selectedBrandData && selectedModel
               ? `${selectedBrandData.name} ${selectedModel} (${selectedYear})`
               : undefined,
-          deliveryAddress: address,
+          // Only the id of a saved, server-owned address is ever sent — the
+          // server looks it up scoped to the current session and rejects
+          // checkout if it doesn't belong to this customer (see Fix 6).
+          addressId: address.id,
           items: cartItems.map((line) => ({
             id: line.product.id,
             quantity: line.quantity,
@@ -2582,12 +2727,15 @@ export function HomeClient({ products }: { products: Product[] }) {
         }}
         onAddNew={() => {
           setEditingAddressId(null);
+          setAddressFormError(null);
           setIsAddressFormOpen(true);
         }}
         onEdit={(id) => {
           setEditingAddressId(id);
+          setAddressFormError(null);
           setIsAddressFormOpen(true);
         }}
+        onSetDefault={handleSetDefaultAddress}
       />
 
       {isAddressFormOpen ? (
@@ -2600,8 +2748,12 @@ export function HomeClient({ products }: { products: Product[] }) {
           onClose={() => {
             setIsAddressFormOpen(false);
             setEditingAddressId(null);
+            setAddressFormError(null);
           }}
           onSave={handleSaveAddress}
+          onDelete={handleDeleteAddress}
+          isSaving={isSavingAddress}
+          error={addressFormError}
         />
       ) : null}
 

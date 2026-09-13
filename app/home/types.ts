@@ -62,6 +62,8 @@ export type Address = {
   city: string;
   pincode: string;
   contactName: string;
+  /** Delivery contact number — may differ from the logged-in account's own phone. */
+  phone: string;
   isDefault?: boolean;
   deliveryEstimate: string;
   availabilityNote: string;
