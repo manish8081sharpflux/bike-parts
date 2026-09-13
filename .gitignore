@@ -42,6 +42,7 @@ next-env.d.ts
 
 # admin-uploaded product photos (local dev storage — not committed)
 /public/uploads/
+/public/uploads-dev/
 e2e/_shots/
 
 # Meilisearch self-hosted binary + local data (not committed)

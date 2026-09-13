@@ -146,9 +146,10 @@ export function getPlatformServices(): ServiceStatus[] {
         "CLOUDFLARE_R2_ACCESS_KEY_ID",
         "CLOUDFLARE_R2_SECRET_ACCESS_KEY",
         "CLOUDFLARE_R2_BUCKET",
+        "CLOUDFLARE_R2_PUBLIC_URL",
       ],
-      installed: false,
-      note: "Env contract is defined; SDK install was blocked by package-manager failures.",
+      installed: true,
+      note: "Product image storage — lib/storage/product-images.ts, via the S3-compatible client in lib/storage/r2-client.ts. Falls back to local disk (public/uploads-dev) only outside production when unconfigured.",
     },
     {
       name: "Cloudflare Images",

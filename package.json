@@ -15,6 +15,8 @@
     "test:webhook-lifecycle": "tsx --test scripts/webhook-lifecycle.test.ts",
     "test:porter-state": "tsx --test scripts/porter-state.test.ts",
     "test:addresses": "tsx --test scripts/addresses.test.ts scripts/addresses-http.test.ts",
+    "test:product-image-storage": "tsx --test scripts/product-image-storage.test.ts",
+    "test:product-image-storage-prod": "tsx --test scripts/product-image-storage-prod.test.ts",
     "reconcile:payments": "tsx scripts/reconcile-payments.ts",
     "reconcile:porter": "tsx scripts/reconcile-porter.ts",
     "meilisearch:up": "node scripts/start-meilisearch.mjs",
@@ -27,6 +29,7 @@
     "postinstall": "prisma skills sync || exit 0"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1131.0",
     "@base-ui/react": "^1.7.0",
     "@hookform/resolvers": "^5.9.1",
     "@prisma/client": "^6.19.3",

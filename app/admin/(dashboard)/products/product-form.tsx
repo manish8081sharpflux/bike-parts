@@ -256,13 +256,13 @@ export function ProductForm({ action, defaultValues: v = {}, submitLabel }: {
     <div className="min-w-0 space-y-5">
     <Section title="Product Images" description="Use a clear main image and additional angles of the same product.">
       <Field label="Main Image URL" name="imageUrl" placeholder="/assets/... or https://..." defaultValue={v.imageUrl ?? ""} />
-      <Field label="Or Upload Main Image" name="imageFile" type="file" accept="image/jpeg,image/png,image/webp,image/gif" />
-      <p className="text-xs text-zinc-500">A main image upload replaces the URL. Maximum 8 MB per image.</p>
+      <Field label="Or Upload Main Image" name="imageFile" type="file" accept="image/jpeg,image/png,image/webp" />
+      <p className="text-xs text-zinc-500">A main image upload replaces the URL. JPG, PNG, or WEBP, maximum 8 MB.</p>
       <label className="flex flex-col gap-1 text-sm font-semibold">Gallery Images / Additional Photos
         <textarea name="images" defaultValue={v.images?.join("\n") ?? ""} rows={2} placeholder="One image URL per line" className={inputClass} />
       </label>
-      <Field label="Upload Additional Photos" name="imageFiles" type="file" multiple accept="image/jpeg,image/png,image/webp,image/gif" />
-      <p className="text-xs text-zinc-500">Gallery uploads are added to the URLs above.</p>
+      <Field label="Upload Additional Photos" name="imageFiles" type="file" multiple accept="image/jpeg,image/png,image/webp" />
+      <p className="text-xs text-zinc-500">Gallery uploads are added to the URLs above. Maximum 8 images per product.</p>
     </Section>
     <Section title="Search Tags">
       <label className="flex flex-col gap-1 text-sm font-semibold text-zinc-700">Keywords

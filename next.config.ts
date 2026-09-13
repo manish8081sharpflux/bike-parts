@@ -1,7 +1,29 @@
 import type { NextConfig } from "next";
 
+// Product images served by <Image> can come from our configured R2 public
+// URL (see lib/storage/config.ts) in addition to same-origin /uploads-dev
+// and /assets paths. Restrict remotePatterns to that exact host — never a
+// wildcard — so <Image> can't be pointed at an arbitrary external host.
+const r2PublicUrl = process.env.CLOUDFLARE_R2_PUBLIC_URL;
+const r2RemotePattern = (() => {
+  if (!r2PublicUrl) return null;
+  try {
+    const url = new URL(r2PublicUrl);
+    return {
+      protocol: url.protocol.replace(":", "") as "http" | "https",
+      hostname: url.hostname,
+      pathname: "/**",
+    };
+  } catch {
+    return null;
+  }
+})();
+
 const nextConfig: NextConfig = {
   devIndicators: false,
+  images: {
+    remotePatterns: r2RemotePattern ? [r2RemotePattern] : [],
+  },
   // Lets you open the dev server from a phone on the same Wi-Fi (e.g.
   // http://192.168.0.101:3000) — without this, Next.js blocks cross-origin
   // dev requests, so the page loads but never hydrates (clicks do nothing).
