@@ -28,6 +28,68 @@ function requiredCheck(name: string, ok: boolean, message: string): ReadinessChe
 }
 
 /**
+ * TRUST_PROXY_HEADERS is a deployment-topology choice, not a universal
+ * requirement (see lib/security/client-ip.ts) — both are valid production
+ * configurations:
+ *
+ *   - unset/"false": the app is directly internet-facing. Client-supplied
+ *     X-Forwarded-For/X-Real-IP/CF-Connecting-IP headers are never trusted
+ *     for rate-limit identity (they're trivially spoofable without a proxy
+ *     in front to overwrite them) — this is the safe default.
+ *   - "true": the app sits behind a trusted reverse proxy (Cloudflare,
+ *     nginx, a load balancer) that itself sets/sanitizes those headers, so
+ *     trusting them is safe *only as long as the app is unreachable except
+ *     through that proxy*.
+ *
+ * Only a value that's neither is a real misconfiguration (a typo the
+ * operator should fix) — everything else passes, with "true" surfacing a
+ * reminder rather than a failure.
+ */
+function trustProxyCheck(env: EnvLike): ReadinessCheck {
+  const raw = env.TRUST_PROXY_HEADERS?.trim();
+
+  if (!raw) {
+    return {
+      name: "trusted proxy",
+      required: false,
+      configured: false,
+      ok: true,
+      message:
+        "TRUST_PROXY_HEADERS not set — direct-exposure mode: forwarded IP headers (X-Forwarded-For, X-Real-IP, CF-Connecting-IP) are ignored for rate limiting",
+    };
+  }
+
+  if (raw !== "true" && raw !== "false") {
+    return {
+      name: "trusted proxy",
+      required: true,
+      configured: false,
+      ok: false,
+      message: `TRUST_PROXY_HEADERS must be exactly "true" or "false" (got "${raw}")`,
+    };
+  }
+
+  if (raw === "true") {
+    return {
+      name: "trusted proxy",
+      required: false,
+      configured: true,
+      ok: true,
+      message:
+        "Proxy headers are trusted (TRUST_PROXY_HEADERS=true). Ensure the application is reachable only through your trusted proxy/load balancer.",
+    };
+  }
+
+  return {
+    name: "trusted proxy",
+    required: false,
+    configured: true,
+    ok: true,
+    message: "TRUST_PROXY_HEADERS=false — direct-exposure mode: forwarded IP headers are ignored for rate limiting",
+  };
+}
+
+/**
  * Meilisearch is a derived search index, not the source of truth (see Fix
  * 8) — PostgreSQL is always a valid fallback, so a production deployment
  * that intentionally runs without Meilisearch is not misconfigured. Only
@@ -64,7 +126,7 @@ export function checkProductionReadiness(env: EnvLike): ReadinessCheck[] {
   const checks: ReadinessCheck[] = [
     requiredCheck("database", present(env, "DATABASE_URL"), "Database configured"),
     requiredCheck("redis", present(env, "REDIS_URL"), "Redis configured"),
-    requiredCheck("trusted proxy", env.TRUST_PROXY_HEADERS === "true", "TRUST_PROXY_HEADERS=true"),
+    trustProxyCheck(env),
     requiredCheck("admin email", present(env, "ADMIN_EMAIL"), "Admin email configured"),
     requiredCheck(
       "admin password",

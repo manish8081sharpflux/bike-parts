@@ -36,11 +36,6 @@ per `lib/security/production-config.ts`):
   endpoints that fail closed (OTP, admin login, checkout, addresses,
   refunds) return `503` rather than silently disabling protection; only
   public search fails *open*.
-- `TRUST_PROXY_HEADERS=true` — **only** set this if the app sits behind a
-  trusted reverse proxy (Cloudflare, nginx, your host's load balancer) that
-  itself sets `CF-Connecting-IP`/`X-Forwarded-For`/`X-Real-IP` and can't be
-  bypassed by a client setting those headers directly. If the app is
-  directly internet-facing, leave it unset — see `lib/security/client-ip.ts`.
 - `ADMIN_EMAIL`, `ADMIN_PASSWORD` (12+ chars, not a common word) — the single
   admin account.
 - `ADMIN_SESSION_SECRET` — 32+ random chars, not a dictionary word. Generate
@@ -58,6 +53,22 @@ per `lib/security/production-config.ts`):
 
 **Optional** (absence is a supported configuration, not an error):
 
+- `TRUST_PROXY_HEADERS` — a deployment-topology choice, not a universal
+  requirement; both values below are valid production configurations, and
+  `pnpm security:check` never fails just because it's `false` or unset.
+  - **Unset or `false` (the safe default)** — the app is directly
+    internet-facing. Client-supplied `X-Forwarded-For`/`X-Real-IP`/
+    `CF-Connecting-IP` headers are trivially spoofable without a proxy in
+    front to overwrite them, so they're ignored entirely for rate-limit
+    identity — see `lib/security/client-ip.ts`.
+  - **`true`** — set this **only** if the app sits behind a trusted reverse
+    proxy (Cloudflare, nginx, your host's load balancer) that itself
+    sets/sanitizes those headers, **and the app is reachable only through
+    that proxy** — a client that can reach the app directly could otherwise
+    spoof its way past IP-based rate limits. `pnpm security:check` prints a
+    reminder of exactly this whenever it's enabled.
+  - Any other value (e.g. `yes`, `1`, `enabled`) is treated as a
+    misconfiguration and fails `pnpm security:check`.
 - `MEILISEARCH_HOST` / `MEILISEARCH_PORT` / `MEILISEARCH_PROTOCOL` /
   `MEILISEARCH_API_KEY` / `MEILISEARCH_INDEX` / `MEILISEARCH_HTTP_TIMEOUT_MS`
   — all-or-nothing. Fully set → search hits the live index. Fully absent →

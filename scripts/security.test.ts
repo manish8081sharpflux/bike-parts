@@ -8,6 +8,7 @@ import {
   verifyAdminSessionToken,
 } from "@/lib/auth/admin-session";
 import { assertAdminLoginRateLimit } from "@/lib/security/admin-login";
+import { getClientIp } from "@/lib/security/client-ip";
 import { buildContentSecurityPolicy, buildStaticSecurityHeaders } from "@/lib/security/headers";
 import { generateNonce } from "@/lib/security/nonce";
 import { assertProductionReady, checkProductionReadiness } from "@/lib/security/production-config";
@@ -197,7 +198,9 @@ test("production readiness rejects weak critical secrets without returning their
 const validCriticalEnv: Record<string, string> = {
   DATABASE_URL: "postgresql://localhost/db",
   REDIS_URL: "redis://localhost:6379",
-  TRUST_PROXY_HEADERS: "true",
+  // TRUST_PROXY_HEADERS deliberately left unset here — the baseline
+  // represents the safe, direct-exposure default; see the dedicated
+  // "trusted proxy" tests below for the true/false/invalid cases.
   ADMIN_EMAIL: "admin@example.com",
   ADMIN_PASSWORD: "a-genuinely-long-admin-password",
   ADMIN_SESSION_SECRET: "b5d987e80f714f01a6fb58dab58d88fb00000000000000000000000000",
@@ -212,6 +215,70 @@ const validCriticalEnv: Record<string, string> = {
   CLOUDFLARE_R2_BUCKET: "bucket",
   CLOUDFLARE_R2_PUBLIC_URL: "https://pub.example.com",
 };
+
+test("A: production + TRUST_PROXY_HEADERS=true passes readiness, with a reachability reminder", () => {
+  const env = { ...validCriticalEnv, TRUST_PROXY_HEADERS: "true" };
+  const check = checkProductionReadiness(env).find((c) => c.name === "trusted proxy");
+  assert.equal(check?.required, false);
+  assert.equal(check?.ok, true);
+  assert.match(check?.message ?? "", /trusted.*proxy\/load balancer/i);
+  assert.doesNotThrow(() => assertProductionReady(env));
+});
+
+test("B: production + TRUST_PROXY_HEADERS=false passes readiness", () => {
+  const env = { ...validCriticalEnv, TRUST_PROXY_HEADERS: "false" };
+  const check = checkProductionReadiness(env).find((c) => c.name === "trusted proxy");
+  assert.equal(check?.required, false);
+  assert.equal(check?.ok, true);
+  assert.doesNotThrow(() => assertProductionReady(env));
+});
+
+test("C: production + TRUST_PROXY_HEADERS unset passes readiness (safe default)", () => {
+  const env = { ...validCriticalEnv };
+  delete env.TRUST_PROXY_HEADERS;
+  const check = checkProductionReadiness(env).find((c) => c.name === "trusted proxy");
+  assert.equal(check?.required, false);
+  assert.equal(check?.configured, false);
+  assert.equal(check?.ok, true);
+  assert.doesNotThrow(() => assertProductionReady(env));
+});
+
+test("D: an invalid TRUST_PROXY_HEADERS value fails readiness", () => {
+  for (const invalid of ["yes", "1", "enabled", "abc"]) {
+    const env = { ...validCriticalEnv, TRUST_PROXY_HEADERS: invalid };
+    const check = checkProductionReadiness(env).find((c) => c.name === "trusted proxy");
+    assert.equal(check?.required, true, `"${invalid}" should be treated as a real misconfiguration`);
+    assert.equal(check?.ok, false);
+    assert.throws(() => assertProductionReady(env), /trusted proxy/i);
+  }
+});
+
+test("E: with proxy trust disabled, spoofed forwarding headers are never used for rate-limit identity", () => {
+  Object.assign(process.env, { NODE_ENV: "production" });
+  delete process.env.TRUST_PROXY_HEADERS;
+  const spoofed = new Headers({
+    "x-forwarded-for": "1.2.3.4",
+    "x-real-ip": "1.2.3.4",
+    "cf-connecting-ip": "1.2.3.4",
+  });
+  const ip = getClientIp({ headers: spoofed });
+  assert.notEqual(ip, "1.2.3.4");
+});
+
+test("F: with proxy trust enabled, the documented header precedence (CF-Connecting-IP > X-Forwarded-For > X-Real-IP) applies", () => {
+  Object.assign(process.env, { NODE_ENV: "production" });
+  process.env.TRUST_PROXY_HEADERS = "true";
+
+  assert.equal(
+    getClientIp({ headers: new Headers({ "cf-connecting-ip": "9.9.9.9", "x-forwarded-for": "1.1.1.1", "x-real-ip": "2.2.2.2" }) }),
+    "9.9.9.9"
+  );
+  assert.equal(
+    getClientIp({ headers: new Headers({ "x-forwarded-for": "1.1.1.1, 5.5.5.5", "x-real-ip": "2.2.2.2" }) }),
+    "1.1.1.1"
+  );
+  assert.equal(getClientIp({ headers: new Headers({ "x-real-ip": "2.2.2.2" }) }), "2.2.2.2");
+});
 
 test("Meilisearch absent is optional and does not fail overall readiness (PostgreSQL fallback)", () => {
   const checks = checkProductionReadiness(validCriticalEnv);
