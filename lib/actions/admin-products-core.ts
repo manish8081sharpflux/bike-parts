@@ -14,7 +14,7 @@
  */
 import { prisma } from "@/lib/db";
 import { readProductDetails } from "@/lib/products/product-details";
-import { syncListingSearch } from "@/lib/search/meilisearch-http";
+import { deleteListingSearchDocument, syncListingSearch } from "@/lib/search/meilisearch-http";
 import {
   deleteOwnedProductImagesByUrl,
   deleteProductImagesByKey,
@@ -284,9 +284,21 @@ export async function deleteProduct(id: string) {
       .catch(() => {});
   }
 
-  if (listing) {
-    const remaining = await prisma.bikePartListing.findUnique({ where: { id } });
-    await syncListingSearch(remaining ?? { ...listing, status: "ARCHIVED" });
+  if (hardDeleted) {
+    // The row is gone for good — just make sure search stops returning it.
+    // Never attempt to sync an "archived copy" after a real delete.
+    await deleteListingSearchDocument(id);
+  } else if (listing) {
+    // Hard-delete failed (order history references it) and it was archived
+    // instead — sync that ARCHIVED status so search removes it too, and
+    // record whether that desired state was actually reached (see
+    // searchSynced's semantics: true here means "confirmed removed from
+    // search", not "was ever added").
+    const archived = await prisma.bikePartListing.findUnique({ where: { id } });
+    if (archived) {
+      const synced = await syncListingSearch(archived);
+      await prisma.bikePartListing.update({ where: { id }, data: { searchSynced: synced } }).catch(() => {});
+    }
   }
 
   // Only clean up images once the listing is actually gone — an archived

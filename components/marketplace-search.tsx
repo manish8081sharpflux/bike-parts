@@ -7,7 +7,6 @@ import {
   PackageCheck,
   RefreshCcw,
   Search,
-  Star,
 } from "lucide-react";
 import { useMemo } from "react";
 import { useForm, useWatch } from "react-hook-form";
@@ -23,7 +22,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import type { BikePart } from "@/lib/products/sample-products";
+import type { SearchDocument } from "@/lib/search/search-document";
 
 const searchSchema = z.object({
   q: z.string().max(80),
@@ -33,11 +32,16 @@ const searchSchema = z.object({
 type SearchForm = z.infer<typeof searchSchema>;
 
 type SearchPayload = {
-  hits: BikePart[];
-  found: number;
-  source: "meilisearch" | "local";
-  setupRequired: boolean;
+  items: SearchDocument[];
+  total: number;
+  page: number;
+  limit: number;
+  source: "meilisearch" | "database";
 };
+
+function formatCondition(condition: SearchDocument["condition"]) {
+  return condition.charAt(0) + condition.slice(1).toLowerCase();
+}
 
 // Matches the real category list admin listings are created under (see
 // CATEGORIES in app/admin/(dashboard)/products/product-form.tsx) — search
@@ -94,7 +98,7 @@ export function MarketplaceSearch() {
     queryFn: () => fetchProducts(normalizedValues),
   });
 
-  const products = searchQuery.data?.hits ?? [];
+  const products = searchQuery.data?.items ?? [];
 
   return (
     <section className="w-full border-y bg-white">
@@ -134,12 +138,12 @@ export function MarketplaceSearch() {
           <span>
             {searchQuery.isLoading
               ? "Searching inventory..."
-              : `${searchQuery.data?.found ?? products.length} matching parts`}
+              : `${searchQuery.data?.total ?? products.length} matching parts`}
           </span>
           <Badge variant={searchQuery.data?.source === "meilisearch" ? "default" : "secondary"}>
             {searchQuery.data?.source === "meilisearch"
               ? "Live search"
-              : "Local fallback"}
+              : "Database fallback"}
           </Badge>
         </div>
 
@@ -160,7 +164,7 @@ export function MarketplaceSearch() {
                       {product.brand} / {product.category}
                     </p>
                   </div>
-                  <Badge variant="outline">{product.condition}</Badge>
+                  <Badge variant="outline">{formatCondition(product.condition)}</Badge>
                 </div>
               </CardHeader>
               <CardContent className="flex flex-col gap-4">
@@ -168,14 +172,14 @@ export function MarketplaceSearch() {
                   {product.description}
                 </p>
                 <div className="flex flex-wrap gap-2">
-                  {product.tags.map((tag) => (
+                  {product.searchTags.map((tag) => (
                     <Badge key={tag} variant="secondary">
                       {tag}
                     </Badge>
                   ))}
                 </div>
               </CardContent>
-              <CardFooter className="grid grid-cols-3 gap-3 rounded-b-md bg-slate-50 text-sm">
+              <CardFooter className="grid grid-cols-2 gap-3 rounded-b-md bg-slate-50 text-sm">
                 <span className="flex items-center gap-1 font-medium">
                   <IndianRupee className="size-3.5" />
                   {product.price.toLocaleString("en-IN")}
@@ -183,10 +187,6 @@ export function MarketplaceSearch() {
                 <span className="flex items-center gap-1 text-slate-600">
                   <PackageCheck className="size-3.5" />
                   {product.stock}
-                </span>
-                <span className="flex items-center gap-1 text-slate-600">
-                  <Star className="size-3.5 fill-amber-400 text-amber-500" />
-                  {product.rating}
                 </span>
               </CardFooter>
             </Card>

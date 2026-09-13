@@ -12,6 +12,10 @@ const platformEnvSchema = z.object({
   MEILISEARCH_PROTOCOL: z.enum(["http", "https"]).default("http"),
   MEILISEARCH_API_KEY: z.string().optional(),
   MEILISEARCH_INDEX: z.string().default("bike_parts"),
+  // Every Meilisearch HTTP call (search, sync, settings, reindex) is bounded
+  // by this — storefront requests must never hang on a slow/wedged search
+  // engine. See lib/search/meilisearch-client.ts.
+  MEILISEARCH_HTTP_TIMEOUT_MS: z.coerce.number().default(5000),
   CLOUDFLARE_ACCOUNT_ID: z.string().optional(),
   CLOUDFLARE_R2_ACCESS_KEY_ID: z.string().optional(),
   CLOUDFLARE_R2_SECRET_ACCESS_KEY: z.string().optional(),

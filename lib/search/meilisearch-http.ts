@@ -1,192 +1,140 @@
-import { platformEnv, getMeilisearchBaseUrl } from "@/lib/platform/service-env";
+// Orchestration layer over the low-level Meilisearch client — index
+// settings, per-listing sync, and search. Deliberately has no sample-data
+// or DB fallback logic itself; see app/api/search/route.ts (API-level
+// fallback) and scripts/reindex-meilisearch.ts (real full rebuild) for
+// those. See Fix 8.
 import type { BikePartListing } from "@prisma/client";
+import { isListingSearchable, toSearchDocument, type SearchDocument } from "./search-document";
 import {
-  type BikePart,
-  sampleProducts,
-  searchSampleProducts,
-} from "@/lib/products/sample-products";
+  getIndexUid,
+  indexPath,
+  isMeilisearchConfigured,
+  MeilisearchError,
+  meiliFetch,
+  meiliRequest,
+  waitForMeiliTask,
+} from "./meilisearch-client";
 
-export type ProductSearchResult = {
-  hits: BikePart[];
-  found: number;
-  source: "meilisearch" | "local";
-  setupRequired: boolean;
-};
+export { isMeilisearchConfigured, waitForMeiliTask, MeilisearchError };
 
-function getMeilisearchHeaders() {
-  return {
-    "Content-Type": "application/json",
-    Authorization: `Bearer ${platformEnv.MEILISEARCH_API_KEY ?? ""}`,
-  };
+const SEARCHABLE_ATTRIBUTES = ["name", "brand", "category", "productType", "searchTags", "compatibleModels"];
+const FILTERABLE_ATTRIBUTES = ["brand", "category", "productType", "status", "condition"];
+const SORTABLE_ATTRIBUTES = ["price", "createdAt"];
+
+/**
+ * Creates the index if it doesn't exist yet and applies explicit
+ * searchable/filterable/sortable settings — deliberately never seeds any
+ * documents (sample or otherwise). Safe to call repeatedly/idempotently.
+ */
+export async function ensureSearchIndexSettings(): Promise<{ ok: boolean; reason: string }> {
+  if (!isMeilisearchConfigured()) {
+    return { ok: false, reason: "Meilisearch environment variables are missing." };
+  }
+
+  try {
+    const existing = await meiliFetch(indexPath());
+    if (!existing.ok && existing.status !== 404) {
+      throw new MeilisearchError(`Unexpected status checking index: ${existing.status}`);
+    }
+    if (!existing.ok) {
+      await meiliRequest("/indexes", { method: "POST", body: { uid: getIndexUid(), primaryKey: "id" } });
+    }
+
+    await meiliRequest(indexPath("/settings"), {
+      method: "PATCH",
+      body: {
+        searchableAttributes: SEARCHABLE_ATTRIBUTES,
+        filterableAttributes: FILTERABLE_ATTRIBUTES,
+        sortableAttributes: SORTABLE_ATTRIBUTES,
+      },
+    });
+
+    return { ok: true, reason: "Index settings applied." };
+  } catch (error) {
+    console.error("[search] ensureSearchIndexSettings failed:", error);
+    return { ok: false, reason: error instanceof MeilisearchError ? error.message : "Unexpected error." };
+  }
 }
 
-function documentsUrl() {
-  return `${getMeilisearchBaseUrl()}/indexes/${platformEnv.MEILISEARCH_INDEX}/documents`;
-}
-
-/** Converts an admin listing into the flat shape the search index (and MarketplaceSearch) expects. */
-function toSearchDocument(listing: BikePartListing): BikePart {
-  return {
-    id: listing.id,
-    name: listing.name,
-    brand: listing.brand,
-    category: listing.category,
-    condition:
-      listing.condition === "NEW" ? "New" : listing.condition === "USED" ? "Used" : "Refurbished",
-    city: listing.city ?? "",
-    price: Number(listing.price),
-    stock: listing.stock,
-    rating: Number(listing.rating ?? 0),
-    description: listing.description,
-    tags: [
-      ...listing.searchTags,
-      ...listing.compatibleModels,
-      listing.productType,
-      listing.oemPartNumber,
-      listing.sku,
-    ].filter((value): value is string => Boolean(value)),
-  };
-}
-
-/** Keep admin listings searchable — upserts on save, removes when a listing leaves ACTIVE status. */
+/**
+ * Keeps one listing's search document in sync with its current DB state —
+ * called after every admin create/update/delete (see
+ * lib/actions/admin-products-core.ts). ACTIVE upserts the document;
+ * anything else (DRAFT/RESERVED/SOLD/ARCHIVED) deletes it, so a listing can
+ * never remain searchable after it stops being storefront-visible.
+ *
+ * Returns whether the *desired* state was actually reached — true for a
+ * successful upsert AND for a successful delete-because-no-longer-
+ * searchable. The caller uses this (not "was it an add") to set
+ * `searchSynced`.
+ */
 export async function syncListingSearch(listing: BikePartListing): Promise<boolean> {
   if (!isMeilisearchConfigured()) return false;
 
   try {
-    if (listing.status !== "ACTIVE") {
-      const response = await fetch(`${documentsUrl()}/${encodeURIComponent(listing.id)}`, {
+    if (!isListingSearchable(listing)) {
+      const response = await meiliFetch(indexPath(`/documents/${encodeURIComponent(listing.id)}`), {
         method: "DELETE",
-        headers: getMeilisearchHeaders(),
-        signal: AbortSignal.timeout(3000),
       });
       return response.ok || response.status === 404;
     }
 
-    const response = await fetch(documentsUrl(), {
+    const response = await meiliFetch(indexPath("/documents"), {
       method: "POST",
-      headers: getMeilisearchHeaders(),
-      body: JSON.stringify([toSearchDocument(listing)]),
-      signal: AbortSignal.timeout(3000),
+      body: [toSearchDocument(listing)],
     });
     return response.ok;
+  } catch (error) {
+    // The DB row remains saved and is simply marked unsynced — see
+    // lib/actions/admin-products-core.ts and scripts/reconcile-search.ts.
+    console.error("[search] syncListingSearch failed for", listing.id, error);
+    return false;
+  }
+}
+
+/** Explicit delete for a hard-deleted product — no need to fabricate a partial listing just to reuse syncListingSearch. */
+export async function deleteListingSearchDocument(id: string): Promise<boolean> {
+  if (!isMeilisearchConfigured()) return false;
+  try {
+    const response = await meiliFetch(indexPath(`/documents/${encodeURIComponent(id)}`), { method: "DELETE" });
+    return response.ok || response.status === 404;
+  } catch (error) {
+    console.error("[search] deleteListingSearchDocument failed for", id, error);
+    return false;
+  }
+}
+
+export async function pingMeilisearch(): Promise<boolean> {
+  if (!isMeilisearchConfigured()) return false;
+  try {
+    const response = await meiliFetch("/health", { timeoutMs: 3000 });
+    return response.ok;
   } catch {
-    // The listing remains saved and marked unsynced if search is unavailable.
     return false;
   }
 }
 
-export function isMeilisearchConfigured() {
-  return Boolean(getMeilisearchBaseUrl() && platformEnv.MEILISEARCH_API_KEY);
-}
+export type MeiliSearchOptions = {
+  filter?: string[];
+  sort?: string[];
+  limit: number;
+  offset: number;
+};
 
-export async function pingMeilisearch() {
-  const baseUrl = getMeilisearchBaseUrl();
-  if (!baseUrl || !platformEnv.MEILISEARCH_API_KEY) {
-    return false;
-  }
+export type MeiliSearchResult = { hits: SearchDocument[]; estimatedTotalHits: number };
 
-  const response = await fetch(`${baseUrl}/health`, {
-    headers: getMeilisearchHeaders(),
-    cache: "no-store",
-  });
-
-  return response.ok;
-}
-
-/** Creates the index (if missing), sets which fields are searchable/filterable, and seeds it with the bundled sample data. */
-export async function ensureProductSearchIndex() {
-  const baseUrl = getMeilisearchBaseUrl();
-  if (!baseUrl || !platformEnv.MEILISEARCH_API_KEY) {
-    return { ok: false, reason: "Meilisearch environment variables are missing." };
-  }
-
-  const indexUrl = `${baseUrl}/indexes/${platformEnv.MEILISEARCH_INDEX}`;
-  const existing = await fetch(indexUrl, { headers: getMeilisearchHeaders(), cache: "no-store" });
-
-  if (!existing.ok) {
-    const created = await fetch(`${baseUrl}/indexes`, {
-      method: "POST",
-      headers: getMeilisearchHeaders(),
-      body: JSON.stringify({ uid: platformEnv.MEILISEARCH_INDEX, primaryKey: "id" }),
-      cache: "no-store",
-    });
-    if (!created.ok) {
-      return { ok: false, reason: await created.text() };
-    }
-  }
-
-  const settings = await fetch(`${indexUrl}/settings`, {
-    method: "PATCH",
-    headers: getMeilisearchHeaders(),
-    body: JSON.stringify({
-      searchableAttributes: ["name", "brand", "category", "tags", "description"],
-      filterableAttributes: ["category", "brand", "condition", "city"],
-      sortableAttributes: ["rating", "price"],
-    }),
-    cache: "no-store",
-  });
-  if (!settings.ok) {
-    return { ok: false, reason: await settings.text() };
-  }
-
-  const imported = await fetch(`${indexUrl}/documents`, {
+/** Pure Meilisearch search — callers decide what to do on failure (see app/api/search/route.ts's DB fallback). */
+export async function searchMeilisearchIndex(query: string, options: MeiliSearchOptions): Promise<MeiliSearchResult> {
+  const payload = await meiliRequest<{ estimatedTotalHits?: number; hits?: SearchDocument[] }>(indexPath("/search"), {
     method: "POST",
-    headers: getMeilisearchHeaders(),
-    body: JSON.stringify(sampleProducts),
-    cache: "no-store",
+    body: {
+      q: query,
+      filter: options.filter && options.filter.length > 0 ? options.filter : undefined,
+      sort: options.sort && options.sort.length > 0 ? options.sort : undefined,
+      limit: options.limit,
+      offset: options.offset,
+    },
   });
 
-  return {
-    ok: imported.ok,
-    reason: imported.ok ? "Index created/updated and seeded." : await imported.text(),
-  };
-}
-
-export async function searchProducts(
-  query: string,
-  options: { category?: string; page?: number } = {}
-): Promise<ProductSearchResult> {
-  if (!isMeilisearchConfigured()) {
-    const hits = searchSampleProducts(query, options.category);
-    return { hits, found: hits.length, source: "local", setupRequired: true };
-  }
-
-  const baseUrl = getMeilisearchBaseUrl();
-  const perPage = 12;
-  const page = options.page ?? 1;
-
-  const response = await fetch(
-    `${baseUrl}/indexes/${platformEnv.MEILISEARCH_INDEX}/search`,
-    {
-      method: "POST",
-      headers: getMeilisearchHeaders(),
-      body: JSON.stringify({
-        q: query.trim(),
-        filter: options.category ? `category = "${options.category}"` : undefined,
-        sort: ["rating:desc"],
-        limit: perPage,
-        offset: (page - 1) * perPage,
-      }),
-      cache: "no-store",
-    }
-  );
-
-  if (!response.ok) {
-    const hits = searchSampleProducts(query, options.category);
-    return { hits, found: hits.length, source: "local", setupRequired: true };
-  }
-
-  const payload = (await response.json()) as {
-    estimatedTotalHits?: number;
-    hits?: BikePart[];
-  };
-
-  const hits = payload.hits ?? [];
-
-  return {
-    hits,
-    found: payload.estimatedTotalHits ?? hits.length,
-    source: "meilisearch",
-    setupRequired: false,
-  };
+  return { hits: payload.hits ?? [], estimatedTotalHits: payload.estimatedTotalHits ?? payload.hits?.length ?? 0 };
 }
