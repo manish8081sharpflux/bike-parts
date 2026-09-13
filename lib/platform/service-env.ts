@@ -54,6 +54,17 @@ type ServiceStatus = {
   name: string;
   group: "frontend" | "backend" | "data" | "search" | "cloud" | "growth";
   requiredEnv: Array<keyof PlatformEnv>;
+  /**
+   * Whether this specific service being unconfigured should make the whole
+   * app report unhealthy. Deliberately independent of `requiredEnv.length`
+   * — plenty of services below declare required env vars (Sentry, Resend,
+   * PostHog, Cloudflare Images, Better Auth, WhatsApp, Firebase, Porter,
+   * Meilisearch) without being load-bearing for the marketplace to actually
+   * serve customers. Only the handful of services this app cannot safely
+   * run production traffic without are `true` — see the health route at
+   * app/api/platform/health/route.ts, which sums *only* these into `ok`.
+   */
+  requiredInProduction: boolean;
   installed: boolean;
   configured: boolean;
   note: string;
@@ -69,6 +80,7 @@ export function getPlatformServices(): ServiceStatus[] {
       name: "Next.js app router",
       group: "frontend",
       requiredEnv: [],
+      requiredInProduction: true,
       installed: true,
       note: "Frontend shell and API route handlers are present.",
     },
@@ -76,6 +88,7 @@ export function getPlatformServices(): ServiceStatus[] {
       name: "Shadcn UI / Tailwind CSS v4",
       group: "frontend",
       requiredEnv: [],
+      requiredInProduction: false,
       installed: true,
       note: "Component registry and global Tailwind tokens are wired.",
     },
@@ -83,6 +96,7 @@ export function getPlatformServices(): ServiceStatus[] {
       name: "TanStack Query",
       group: "frontend",
       requiredEnv: [],
+      requiredInProduction: false,
       installed: true,
       note: "Client query provider powers the search UI.",
     },
@@ -90,6 +104,7 @@ export function getPlatformServices(): ServiceStatus[] {
       name: "React Hook Form + Zod",
       group: "frontend",
       requiredEnv: [],
+      requiredInProduction: false,
       installed: true,
       note: "Search/filter form validation is implemented on the client.",
     },
@@ -97,6 +112,7 @@ export function getPlatformServices(): ServiceStatus[] {
       name: "Motion",
       group: "frontend",
       requiredEnv: [],
+      requiredInProduction: false,
       installed: true,
       note: "Available for interaction polish and page transitions.",
     },
@@ -104,6 +120,7 @@ export function getPlatformServices(): ServiceStatus[] {
       name: "next-pwa",
       group: "frontend",
       requiredEnv: [],
+      requiredInProduction: false,
       installed: true,
       note: "Dependency exists; production runtime config can be enabled later.",
     },
@@ -111,13 +128,19 @@ export function getPlatformServices(): ServiceStatus[] {
       name: "NestJS backend",
       group: "backend",
       requiredEnv: [],
+      requiredInProduction: false,
       installed: false,
-      note: "Scaffold notes are in docs; package install was blocked by pnpm memory failures.",
+      note: "Scaffold notes are in docs; package install was blocked by pnpm memory failures. Not part of the running app — every backend route today is a Next.js API route handler under app/api/.",
     },
     {
       name: "Prisma ORM",
       group: "data",
       requiredEnv: ["DATABASE_URL"],
+      // Not independently gated — it's the same DATABASE_URL as the
+      // "PostgreSQL" entry below, which is the one that actually drives
+      // overall health. Keeping both `false`/`true` avoids double-counting
+      // one requirement as two separate failures.
+      requiredInProduction: false,
       installed: true,
       note: "Schema is present for users, listings, orders, jobs, and notifications.",
     },
@@ -125,6 +148,7 @@ export function getPlatformServices(): ServiceStatus[] {
       name: "PostgreSQL",
       group: "data",
       requiredEnv: ["DATABASE_URL"],
+      requiredInProduction: true,
       installed: true,
       note: "Configured through DATABASE_URL.",
     },
@@ -132,15 +156,21 @@ export function getPlatformServices(): ServiceStatus[] {
       name: "Redis cache / BullMQ",
       group: "data",
       requiredEnv: ["REDIS_URL"],
+      requiredInProduction: true,
       installed: true,
-      note: "Redis URL drives cache and background queues.",
+      note: "Redis URL drives cache and background queues, and backs the shared rate limiter (lib/security/rate-limit.ts) that OTP/admin-login/checkout fail closed without.",
     },
     {
       name: "Meilisearch search",
       group: "search",
       requiredEnv: ["MEILISEARCH_HOST", "MEILISEARCH_API_KEY"],
+      // Explicitly optional — a derived search index, not a source of
+      // truth. Unconfigured (or configured-but-unreachable, see `online`
+      // below) both fall back to querying PostgreSQL directly
+      // (lib/search/db-fallback.ts), so this must never gate overall health.
+      requiredInProduction: false,
       installed: true,
-      note: "Implemented through the Meilisearch REST API — self-hosted windows-amd64.exe binary in infra/meilisearch/, no Docker/WSL required.",
+      note: "Implemented through the Meilisearch REST API — self-hosted windows-amd64.exe binary in infra/meilisearch/, no Docker/WSL required. Optional: unconfigured or unreachable both fall back to PostgreSQL search.",
     },
     {
       name: "Cloudflare R2",
@@ -152,6 +182,7 @@ export function getPlatformServices(): ServiceStatus[] {
         "CLOUDFLARE_R2_BUCKET",
         "CLOUDFLARE_R2_PUBLIC_URL",
       ],
+      requiredInProduction: true,
       installed: true,
       note: "Product image storage — lib/storage/product-images.ts, via the S3-compatible client in lib/storage/r2-client.ts. Falls back to local disk (public/uploads-dev) only outside production when unconfigured.",
     },
@@ -159,6 +190,7 @@ export function getPlatformServices(): ServiceStatus[] {
       name: "Cloudflare Images",
       group: "cloud",
       requiredEnv: ["CLOUDFLARE_IMAGES_ACCOUNT_HASH", "CLOUDFLARE_IMAGES_API_TOKEN"],
+      requiredInProduction: false,
       installed: false,
       note: "Env contract is defined for direct API integration.",
     },
@@ -166,13 +198,15 @@ export function getPlatformServices(): ServiceStatus[] {
       name: "Better Auth",
       group: "backend",
       requiredEnv: ["BETTER_AUTH_SECRET", "BETTER_AUTH_URL"],
+      requiredInProduction: false,
       installed: true,
-      note: "Dependency exists; route integration needs the chosen auth schema.",
+      note: "Dependency is declared but not wired into any auth flow — customer auth is OTP-based (lib/auth/customer-session.ts) and admin auth is a separate signed-cookie session (lib/auth/admin-session.ts); neither uses this package.",
     },
     {
       name: "WhatsApp Cloud API",
       group: "growth",
       requiredEnv: ["WHATSAPP_CLOUD_API_TOKEN", "WHATSAPP_PHONE_NUMBER_ID"],
+      requiredInProduction: false,
       installed: false,
       note: "Env contract is ready for notification workers.",
     },
@@ -180,6 +214,7 @@ export function getPlatformServices(): ServiceStatus[] {
       name: "Firebase Cloud Messaging",
       group: "growth",
       requiredEnv: ["FCM_PROJECT_ID", "FCM_CLIENT_EMAIL", "FCM_PRIVATE_KEY"],
+      requiredInProduction: false,
       installed: false,
       note: "Firebase Admin install hit a Windows gRPC extraction failure.",
     },
@@ -187,13 +222,20 @@ export function getPlatformServices(): ServiceStatus[] {
       name: "Resend",
       group: "growth",
       requiredEnv: ["RESEND_API_KEY", "RESEND_FROM_EMAIL"],
+      requiredInProduction: false,
       installed: false,
       note: "Env contract is ready for email workers.",
     },
     {
       name: "Razorpay",
       group: "backend",
-      requiredEnv: ["RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET"],
+      // RAZORPAY_WEBHOOK_SECRET was missing here even though checkout can't
+      // safely rely on the webhook safety net without it (see
+      // app/api/webhooks/razorpay/route.ts and lib/security/production-config.ts,
+      // which already treats it as required) — a deployment with keys but
+      // no webhook secret would previously have shown as "configured".
+      requiredEnv: ["RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET", "RAZORPAY_WEBHOOK_SECRET"],
+      requiredInProduction: true,
       installed: true,
       note: "Order creation, checkout, and signature verification are implemented in lib/razorpay.ts.",
     },
@@ -201,6 +243,10 @@ export function getPlatformServices(): ServiceStatus[] {
       name: "Porter delivery",
       group: "backend",
       requiredEnv: ["PORTER_API_KEY"],
+      // Whether Porter is load-bearing depends on the deployment (some
+      // operators dispatch deliveries manually/through another courier) —
+      // not universally required the way payments/DB/cache are.
+      requiredInProduction: false,
       installed: true,
       note: "Quote/create/track wrapper is implemented in lib/porter.ts against Porter's Partner API v1 shape.",
     },
@@ -208,6 +254,7 @@ export function getPlatformServices(): ServiceStatus[] {
       name: "Admin panel",
       group: "backend",
       requiredEnv: ["ADMIN_EMAIL", "ADMIN_PASSWORD", "ADMIN_SESSION_SECRET"],
+      requiredInProduction: false,
       installed: true,
       note: "Cookie-session admin at /admin — dashboard, orders (status + Porter dispatch), and product CRUD.",
     },
@@ -215,6 +262,7 @@ export function getPlatformServices(): ServiceStatus[] {
       name: "Sentry",
       group: "growth",
       requiredEnv: ["SENTRY_DSN"],
+      requiredInProduction: false,
       installed: false,
       note: "Env contract is defined; SDK install was blocked by package-manager failures.",
     },
@@ -222,6 +270,7 @@ export function getPlatformServices(): ServiceStatus[] {
       name: "PostHog",
       group: "growth",
       requiredEnv: ["NEXT_PUBLIC_POSTHOG_KEY"],
+      requiredInProduction: false,
       installed: true,
       note: "Client provider initializes when public env keys are present.",
     },

@@ -19,6 +19,7 @@
     "test:product-image-storage-prod": "tsx --test scripts/product-image-storage-prod.test.ts",
     "test:search": "tsx --test scripts/search.test.ts scripts/search-live.test.mts",
     "test:security": "tsx --test scripts/security.test.ts",
+    "test:platform-health": "tsx --test scripts/platform-health.test.ts",
     "security:check": "tsx scripts/check-production-readiness.ts",
     "reconcile:payments": "tsx scripts/reconcile-payments.ts",
     "reconcile:porter": "tsx scripts/reconcile-porter.ts",
