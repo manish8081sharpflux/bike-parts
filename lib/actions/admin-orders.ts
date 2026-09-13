@@ -16,9 +16,12 @@ import {
   markRefundFailed,
   markRefundNeedsReconciliation,
   markRefundSucceeded,
-  requestRefund,
 } from "@/lib/order-refund-state";
-import { claimPorterDispatch } from "@/lib/order-delivery-state";
+import {
+  applyPorterStatus,
+  cancelAdminOrderBeforeDispatch,
+  claimPorterDispatch,
+} from "@/lib/order-delivery-state";
 import type { OrderStatus } from "@prisma/client";
 
 const ORDER_STATUSES: OrderStatus[] = [
@@ -30,43 +33,6 @@ const ORDER_STATUSES: OrderStatus[] = [
   "DELIVERED",
   "CANCELLED",
 ];
-
-// Relative progress of each stage, used to decide whether a Porter-reported
-// status represents forward progress (so a stale/out-of-order API response
-// can never move an order backwards). CANCELLED has no natural rank — it's
-// handled as a special case below.
-const ORDER_STATUS_RANK: Record<OrderStatus, number> = {
-  PENDING: 0,
-  PAID: 1,
-  PACKED: 2,
-  SHIPPED: 3,
-  OUT_FOR_DELIVERY: 4,
-  DELIVERED: 5,
-  CANCELLED: -1,
-};
-
-/**
- * Best-effort mapping from Porter's (partner-specific, not fully documented)
- * delivery status string to our own OrderStatus enum. Returns null when the
- * string doesn't clearly correspond to one of our stages — in that case we
- * still record the raw text (see refreshDeliveryStatusAction) but leave the
- * order's actual status untouched rather than guess.
- */
-function mapPorterStatusToOrderStatus(raw: string): OrderStatus | null {
-  const value = raw.toLowerCase();
-  if (value.includes("deliver") || value.includes("complet")) return "DELIVERED";
-  if (value.includes("cancel")) return "CANCELLED";
-  if (
-    value.includes("transit") ||
-    value.includes("ongoing") ||
-    value.includes("picked") ||
-    value.includes("arrived") ||
-    value.includes("out_for_delivery")
-  ) {
-    return "OUT_FOR_DELIVERY";
-  }
-  return null;
-}
 
 type DeliveryAddress = {
   contactName?: string;
@@ -88,13 +54,16 @@ export async function updateOrderStatusAction(orderId: string, formData: FormDat
     redirect(`/admin/orders/${orderId}?error=${encodeURIComponent("Invalid status.")}`);
   }
 
-  const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
-
-  if (
-    statusRaw === "CANCELLED" &&
-    (order.porterOrderId || ["SHIPPED", "OUT_FOR_DELIVERY", "DELIVERED"].includes(order.status))
-  ) {
-    redirect(`/admin/orders/${orderId}?error=${encodeURIComponent("Dispatched orders require Porter cancellation/reconciliation before local cancellation.")}`);
+  if (statusRaw === "CANCELLED") {
+    const result = await cancelAdminOrderBeforeDispatch(orderId, adminNote);
+    if (!result.cancelled) {
+      redirect(`/admin/orders/${orderId}?error=${encodeURIComponent("Dispatched or already-cancelled orders require Porter cancellation/reconciliation before local cancellation.")}`);
+    }
+    revalidatePath(`/admin/orders/${orderId}`);
+    revalidatePath("/admin/orders");
+    revalidatePath("/admin");
+    if (result.refundRequested) redirect(`/admin/orders/${orderId}?refundReady=1`);
+    return;
   }
 
   // Cancelling an order that was already paid for means the customer is now
@@ -103,9 +72,6 @@ export async function updateOrderStatusAction(orderId: string, formData: FormDat
   // makes the Refund card (with its Approve/Reject actions) appear below
   // without any extra step. Only kicks in the first time: if a refund is
   // already requested/processing/refunded/rejected, that flow is left alone.
-  const shouldAutoRequestRefund =
-    statusRaw === "CANCELLED" && order.paymentStatus === "PAID" && order.refundStatus === "NONE";
-
   await prisma.$transaction(async (tx) => {
     await tx.order.update({
       where: { id: orderId },
@@ -118,12 +84,6 @@ export async function updateOrderStatusAction(orderId: string, formData: FormDat
         message: `Status changed to ${statusRaw}${adminNote ? ` — ${adminNote}` : ""}`,
       },
     });
-    if (shouldAutoRequestRefund) {
-      const refundRequest = await requestRefund(orderId, "Order cancelled by admin", tx);
-      if (refundRequest === "not_refundable") {
-        throw new Error("The paid order changed before its refund request could be created.");
-      }
-    }
   });
 
   revalidatePath(`/admin/orders/${orderId}`);
@@ -132,9 +92,6 @@ export async function updateOrderStatusAction(orderId: string, formData: FormDat
 
   // Send the admin back to this order with a flag that pops up a modal
   // pointing them straight at the refund they now need to approve or reject.
-  if (shouldAutoRequestRefund) {
-    redirect(`/admin/orders/${orderId}?refundReady=1`);
-  }
 }
 
 export async function dispatchOrderAction(orderId: string) {
@@ -249,32 +206,7 @@ export async function refreshDeliveryStatusAction(orderId: string) {
 
     const { status } = await getPorterDeliveryStatus(order.porterOrderId);
 
-    // Auto-sync our own status when Porter's reported status clearly maps to
-    // one of our stages and represents forward progress — e.g. Porter saying
-    // "delivered" flips the order to DELIVERED here, not just the side note.
-    const mappedStatus = mapPorterStatusToOrderStatus(status);
-    const isForwardProgress =
-      mappedStatus === "CANCELLED"
-        ? order.status !== "DELIVERED" && order.status !== "CANCELLED"
-        : mappedStatus !== null && ORDER_STATUS_RANK[mappedStatus] > ORDER_STATUS_RANK[order.status];
-
-    await prisma.order.update({
-      where: { id: orderId },
-      data: {
-        porterStatus: status,
-        ...(isForwardProgress ? { status: mappedStatus! } : {}),
-      },
-    });
-
-    if (isForwardProgress) {
-      await prisma.orderEvent.create({
-        data: {
-          orderId,
-          type: "STATUS_CHANGE",
-          message: `Status changed to ${mappedStatus} (auto-synced from Porter status "${status}")`,
-        },
-      });
-    }
+    await applyPorterStatus(orderId, status);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not refresh delivery status.";
     redirect(`/admin/orders/${orderId}?error=${encodeURIComponent(message)}`);

@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import test, { after } from "node:test";
 import { prisma } from "@/lib/db";
-import { cancelCustomerOrder, claimPorterDispatch } from "@/lib/order-delivery-state";
+import {
+  applyPorterStatus,
+  cancelAdminOrderBeforeDispatch,
+  cancelCustomerOrder,
+  claimPorterDispatch,
+  mapPorterStatusToOrderStatus,
+} from "@/lib/order-delivery-state";
 
 const suffix = `${Date.now()}-${process.pid}`;
 const orderIds: string[] = [];
@@ -58,6 +64,34 @@ test("duplicate dispatch claims allow one winner", async () => {
   const { created } = await order();
   const claims = await Promise.all([claimPorterDispatch(created.id), claimPorterDispatch(created.id)]);
   assert.deepEqual(claims.sort(), [false, true]);
+});
+
+test("Porter status mapping is specific and monotonic", async () => {
+  assert.equal(mapPorterStatusToOrderStatus("out_for_delivery"), "OUT_FOR_DELIVERY");
+  assert.equal(mapPorterStatusToOrderStatus("in_transit"), "OUT_FOR_DELIVERY");
+  assert.equal(mapPorterStatusToOrderStatus("delivered"), "DELIVERED");
+  assert.equal(mapPorterStatusToOrderStatus("completed"), "DELIVERED");
+  assert.equal(mapPorterStatusToOrderStatus("cancelled"), "CANCELLED");
+  assert.equal(mapPorterStatusToOrderStatus("some-new-provider-state"), null);
+
+  const { created } = await order("SHIPPED");
+  assert.equal((await applyPorterStatus(created.id, "delivered")).transitioned, true);
+  assert.equal((await applyPorterStatus(created.id, "out_for_delivery")).transitioned, false);
+  const final = await prisma.order.findUniqueOrThrow({ where: { id: created.id } });
+  assert.equal(final.status, "DELIVERED");
+  assert.equal(final.porterStatus, "out_for_delivery");
+  assert.equal(await prisma.orderEvent.count({ where: { orderId: created.id, type: "STATUS_CHANGE" } }), 1);
+});
+
+test("admin cancellation and dispatch have exactly one winner", async () => {
+  const { created } = await order();
+  const [dispatch, cancellation] = await Promise.all([
+    claimPorterDispatch(created.id),
+    cancelAdminOrderBeforeDispatch(created.id, "admin test"),
+  ]);
+  assert.equal(Number(dispatch) + Number(cancellation.cancelled), 1);
+  const final = await prisma.order.findUniqueOrThrow({ where: { id: created.id } });
+  assert.notEqual(final.status === "CANCELLED" && final.porterOrderId === "DISPATCHING", true);
 });
 
 after(async () => {
