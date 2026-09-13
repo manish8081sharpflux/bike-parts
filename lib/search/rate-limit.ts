@@ -1,10 +1,10 @@
-// Per-IP rate limiting for the public /api/search endpoint. Reuses the same
-// Redis-backed limiter lib/auth/otp-rate-limit.ts already implements
-// (connection management, dev in-memory fallback, windowed counting)
-// instead of standing up a second, inconsistent one-off limiter — a general
-// API-wide rate limiter is planned for Fix 9, so this deliberately stays
-// small and search-specific until then.
-import { assertOtpRateLimit, getClientIp, OtpRateLimitError, OtpRateLimitUnavailableError } from "@/lib/auth/otp-rate-limit";
+// Per-IP rate limiting for the public /api/search endpoint. Thin,
+// search-specific wrapper over the shared application-wide limiter in
+// lib/security/rate-limit.ts (see Fix 9) — search just needs its own
+// threshold and fail-open policy, not a separate connection-management
+// implementation.
+import { getClientIp } from "@/lib/security/client-ip";
+import { assertRateLimit, RateLimitExceededError } from "@/lib/security/rate-limit";
 
 export { getClientIp };
 
@@ -22,10 +22,9 @@ const SEARCH_WINDOW_MS = 60_000;
  */
 export async function assertSearchRateLimit(ip: string): Promise<void> {
   try {
-    await assertOtpRateLimit(`search:ip:${ip}`, SEARCH_LIMIT, SEARCH_WINDOW_MS);
+    await assertRateLimit(`search:ip:${ip}`, { limit: SEARCH_LIMIT, windowMs: SEARCH_WINDOW_MS }, { failClosed: false });
   } catch (error) {
-    if (error instanceof OtpRateLimitError) throw new SearchRateLimitError(error.message);
-    if (error instanceof OtpRateLimitUnavailableError) return;
+    if (error instanceof RateLimitExceededError) throw new SearchRateLimitError(error.message);
     throw error;
   }
 }

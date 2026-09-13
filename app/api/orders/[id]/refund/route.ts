@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getCustomerSession } from "@/lib/auth/customer-session";
 import { requestRefund } from "@/lib/order-refund-state";
+import { enforceApiRateLimit, rejectInvalidJsonRequest } from "@/lib/security/api-protection";
 
 /**
  * Customer-initiated refund request. Ownership and payment state are checked
@@ -11,6 +12,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const { id } = await params;
   const session = await getCustomerSession();
   if (!session) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+  const limited = await enforceApiRateLimit(request, "refund-request", { limit: 10, windowMs: 15 * 60_000 }, session.user.id);
+  if (limited) return limited;
+  const invalidJson = rejectInvalidJsonRequest(request);
+  if (invalidJson) return invalidJson;
 
   const body = await request.json().catch(() => null);
   const reason = typeof body?.reason === "string" ? body.reason.trim() : "";

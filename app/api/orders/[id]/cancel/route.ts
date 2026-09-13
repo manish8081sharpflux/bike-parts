@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getCustomerSession } from "@/lib/auth/customer-session";
 import { cancelCustomerOrder } from "@/lib/order-delivery-state";
+import { enforceApiRateLimit } from "@/lib/security/api-protection";
 
 /**
  * Customer-initiated order cancellation. Ownership comes from the session.
@@ -16,6 +17,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const { id } = await params;
   const session = await getCustomerSession();
   if (!session) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+  const limited = await enforceApiRateLimit(request, "order-cancel", { limit: 10, windowMs: 15 * 60_000 }, session.user.id);
+  if (limited) return limited;
 
   const order = await prisma.order.findUnique({ where: { id } });
   if (!order || order.buyerId !== session.user.id) {

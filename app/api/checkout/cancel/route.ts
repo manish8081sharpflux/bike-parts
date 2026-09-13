@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { releaseOrderAndRecordEvent } from "@/lib/checkout-stock";
 import { getCustomerSession } from "@/lib/auth/customer-session";
+import { enforceApiRateLimit, rejectInvalidJsonRequest } from "@/lib/security/api-protection";
 
 /**
  * Called by the storefront when a checkout is abandoned before payment
@@ -13,6 +14,10 @@ import { getCustomerSession } from "@/lib/auth/customer-session";
 export async function POST(request: Request) {
   const session = await getCustomerSession();
   if (!session) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+  const limited = await enforceApiRateLimit(request, "checkout-cancel", { limit: 20, windowMs: 15 * 60_000 }, session.user.id);
+  if (limited) return limited;
+  const invalidJson = rejectInvalidJsonRequest(request);
+  if (invalidJson) return invalidJson;
 
   let body: { orderId?: string };
   try {

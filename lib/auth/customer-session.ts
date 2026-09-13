@@ -17,12 +17,21 @@ export function isValidCustomerPhone(phone: string) {
   return /^\d{10}$/.test(phone);
 }
 
+// Same weak-value rejection as ADMIN_SESSION_SECRET (see
+// lib/auth/admin-session.ts) — kept as a small local check rather than a
+// shared import so customer auth doesn't depend on the admin auth module.
+const WEAK_OTP_SECRETS = new Set(["secret", "changeme", "password", "admin", "12345678"]);
+
 function getOtpHashSecret() {
-  if (process.env.CUSTOMER_OTP_HASH_SECRET) return process.env.CUSTOMER_OTP_HASH_SECRET;
+  const secret = process.env.CUSTOMER_OTP_HASH_SECRET;
   if (process.env.NODE_ENV === "production") {
-    throw new CustomerAuthConfigurationError("CUSTOMER_OTP_HASH_SECRET is not configured.");
+    if (!secret) throw new CustomerAuthConfigurationError("CUSTOMER_OTP_HASH_SECRET is not configured.");
+    if (secret.length < 32 || WEAK_OTP_SECRETS.has(secret.trim().toLowerCase())) {
+      throw new CustomerAuthConfigurationError("CUSTOMER_OTP_HASH_SECRET is too weak for production.");
+    }
+    return secret;
   }
-  return "development-only-customer-otp-secret";
+  return secret || "development-only-customer-otp-secret";
 }
 
 export function hashOtp(phone: string, otp: string) {

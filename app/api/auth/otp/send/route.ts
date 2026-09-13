@@ -8,8 +8,11 @@ import {
 import { assertOtpRateLimit, getClientIp, OtpRateLimitError } from "@/lib/auth/otp-rate-limit";
 import { OtpRateLimitUnavailableError } from "@/lib/auth/otp-rate-limit";
 import { sendCustomerOtpSms } from "@/lib/auth/send-customer-otp";
+import { rejectInvalidJsonRequest } from "@/lib/security/api-protection";
 
 export async function POST(request: Request) {
+  const invalidJson = rejectInvalidJsonRequest(request, 8 * 1024);
+  if (invalidJson) return invalidJson;
   const body = await request.json().catch(() => null);
   const phone = normalizeCustomerPhone(body?.phone);
   if (!isValidCustomerPhone(phone)) {

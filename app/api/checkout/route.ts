@@ -9,6 +9,7 @@ import {
 } from "@/lib/checkout-stock";
 import { calculateCheckoutTotals } from "@/lib/checkout-amount";
 import { getCustomerSession } from "@/lib/auth/customer-session";
+import { enforceApiRateLimit, rejectInvalidJsonRequest } from "@/lib/security/api-protection";
 
 type CheckoutItem = {
   id: string;
@@ -26,6 +27,10 @@ export async function POST(request: Request) {
   if (!session) {
     return NextResponse.json({ error: "Authentication required." }, { status: 401 });
   }
+  const limited = await enforceApiRateLimit(request, "checkout", { limit: 10, windowMs: 15 * 60_000 }, session.user.id);
+  if (limited) return limited;
+  const invalidJson = rejectInvalidJsonRequest(request);
+  if (invalidJson) return invalidJson;
 
   if (!isRazorpayConfigured()) {
     return NextResponse.json(

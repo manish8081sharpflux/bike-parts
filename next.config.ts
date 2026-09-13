@@ -1,5 +1,6 @@
 import type { NextConfig } from "next";
 import { PRODUCT_FORM_BODY_LIMIT_BYTES } from "./lib/storage/image-validation";
+import { buildSecurityHeaders } from "./lib/security/headers";
 
 // Product images served by <Image> can come from our configured R2 public
 // URL (see lib/storage/config.ts) in addition to same-origin /uploads-dev
@@ -21,7 +22,15 @@ const r2RemotePattern = (() => {
 })();
 
 const nextConfig: NextConfig = {
+  poweredByHeader: false,
   devIndicators: false,
+  async headers() {
+    return [
+      { source: "/:path*", headers: buildSecurityHeaders(process.env.NODE_ENV === "production") },
+      { source: "/admin/:path*", headers: [{ key: "Cache-Control", value: "no-store" }] },
+      { source: "/api/auth/:path*", headers: [{ key: "Cache-Control", value: "no-store" }] },
+    ];
+  },
   images: {
     remotePatterns: r2RemotePattern ? [r2RemotePattern] : [],
   },

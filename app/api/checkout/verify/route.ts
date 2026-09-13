@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { verifyRazorpayPaymentSignature } from "@/lib/razorpay";
 import { getCustomerSession } from "@/lib/auth/customer-session";
 import { confirmOrderPayment } from "@/lib/order-payment-state";
+import { enforceApiRateLimit, rejectInvalidJsonRequest } from "@/lib/security/api-protection";
 
 type VerifyBody = {
   orderId: string;
@@ -14,6 +15,10 @@ type VerifyBody = {
 export async function POST(request: Request) {
   const session = await getCustomerSession();
   if (!session) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+  const limited = await enforceApiRateLimit(request, "payment-verify", { limit: 20, windowMs: 15 * 60_000 }, session.user.id);
+  if (limited) return limited;
+  const invalidJson = rejectInvalidJsonRequest(request);
+  if (invalidJson) return invalidJson;
 
   let body: VerifyBody;
   try {
