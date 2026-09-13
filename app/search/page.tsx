@@ -4,6 +4,14 @@ export const metadata = {
   title: "Search Parts — Deep Automobiles",
 };
 
+// Every other route in this app is already dynamically rendered (session/
+// cookie reads elsewhere force it); this was the one page Next statically
+// prerendered at build time. Production CSP now uses a per-request nonce
+// (see proxy.ts), which Next can only attach to a page's scripts when it's
+// rendered per-request — a build-time-static page's inline scripts would
+// have no nonce at all and get blocked by the browser.
+export const dynamic = "force-dynamic";
+
 export default function SearchPage() {
   return (
     <main className="min-h-screen bg-zinc-50">

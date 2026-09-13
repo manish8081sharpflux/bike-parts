@@ -1,6 +1,6 @@
 import type { NextConfig } from "next";
 import { PRODUCT_FORM_BODY_LIMIT_BYTES } from "./lib/storage/image-validation";
-import { buildSecurityHeaders } from "./lib/security/headers";
+import { buildStaticSecurityHeaders } from "./lib/security/headers";
 
 // Product images served by <Image> can come from our configured R2 public
 // URL (see lib/storage/config.ts) in addition to same-origin /uploads-dev
@@ -25,8 +25,11 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   devIndicators: false,
   async headers() {
+    // Content-Security-Policy is deliberately NOT set here — it needs a
+    // fresh per-request nonce in production, so proxy.ts emits it instead.
+    // Keeping it in both places would mean two competing CSP headers.
     return [
-      { source: "/:path*", headers: buildSecurityHeaders(process.env.NODE_ENV === "production") },
+      { source: "/:path*", headers: buildStaticSecurityHeaders(process.env.NODE_ENV === "production") },
       { source: "/admin/:path*", headers: [{ key: "Cache-Control", value: "no-store" }] },
       { source: "/api/auth/:path*", headers: [{ key: "Cache-Control", value: "no-store" }] },
     ];
