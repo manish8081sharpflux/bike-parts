@@ -100,9 +100,8 @@ type MeiliTask = { taskUid: number; status: string };
 /**
  * Meilisearch writes are asynchronous — a 202 with a taskUid doesn't mean
  * the documents are searchable yet. Scripts/tests that need to observe the
- * result (reindex, reconciliation, tests) should await this; individual
- * admin product saves intentionally don't (see syncListingSearch) since
- * eventual consistency there is an acceptable, documented tradeoff.
+ * result must await this. Product sync, reindex, reconciliation, and tests
+ * all use it so accepted work is never reported as completed work.
  */
 export async function waitForMeiliTask(
   taskUid: number,

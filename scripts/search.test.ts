@@ -10,12 +10,17 @@ import assert from "node:assert/strict";
 import test, { after } from "node:test";
 import { prisma } from "@/lib/db";
 import { GET as searchRoute } from "@/app/api/search/route";
-import { isMeilisearchConfigured } from "@/lib/search/meilisearch-http";
+import {
+  applySearchIndexSettings,
+  isMeilisearchConfigured,
+  waitForMutationResponse,
+} from "@/lib/search/meilisearch-http";
 import { isListingSearchable, toSearchDocument } from "@/lib/search/search-document";
 import { searchDatabaseProducts } from "@/lib/search/db-fallback";
 import {
   buildFacetFilter,
   parseLimit,
+  parseFacetValue,
   parsePage,
   parseQuery,
   parseSearchParams,
@@ -85,6 +90,71 @@ test("buildFacetFilter rejects unsafe values and escapes quotes instead of conca
   // allowlist — never escaped-and-forwarded, since that's one less thing
   // that could go wrong than trusting an escaping routine alone.
   assert.equal(buildFacetFilter("brand", 'Bosch "Pro"'), null);
+});
+
+test("facet values are normalized once before either search backend receives them", async () => {
+  const params = parseSearchParams(new URLSearchParams({
+    q: `Facet Parity ${suffix}`,
+    category: 'Engine" OR "1"="1',
+    brand: "  Valid Brand  ",
+  }));
+  assert.equal(params.category, null);
+  assert.equal(params.brand, "Valid Brand");
+  assert.equal(parseFacetValue("   "), null);
+
+  const matching = await makeListing({ name: `Facet Parity ${suffix}`, brand: "Valid Brand", category: "Other" });
+  await makeListing({ name: `Facet Parity ${suffix} mismatch`, brand: "Other Brand", category: 'Engine" OR "1"="1' });
+  const result = await searchDatabaseProducts(params);
+  assert.deepEqual(result.hits.map((hit) => hit.id), [matching.id]);
+});
+
+test("mutation completion distinguishes successful, failed, timed-out, and already-absent tasks", async () => {
+  const accepted = () => new Response(JSON.stringify({ taskUid: 42 }), { status: 202 });
+  assert.equal(await waitForMutationResponse(accepted(), async () => ({ ok: true, status: "succeeded" })), true);
+  assert.equal(await waitForMutationResponse(accepted(), async () => ({ ok: false, status: "failed" })), false);
+  assert.equal(await waitForMutationResponse(accepted(), async () => ({ ok: false, status: "timeout" })), false);
+  assert.equal(await waitForMutationResponse(new Response(null, { status: 404 }), async () => {
+    throw new Error("404 must not poll");
+  }), true);
+  assert.equal(await waitForMutationResponse(new Response(null, { status: 500 })), false);
+});
+
+function indexSettingsClient(options: { existing?: number; create?: "succeeded" | "failed"; settings?: "succeeded" | "failed" }) {
+  const requests: string[] = [];
+  const client = {
+    fetch: async () => new Response(null, { status: options.existing ?? 404 }),
+    request: async (path: string) => {
+      requests.push(path);
+      return { taskUid: path === "/indexes" ? 1 : 2 };
+    },
+    wait: async (taskUid: number) => {
+      const status = taskUid === 1 ? options.create ?? "succeeded" : options.settings ?? "succeeded";
+      return { ok: status === "succeeded", status };
+    },
+  } as unknown as Parameters<typeof applySearchIndexSettings>[0];
+  return { client, requests };
+}
+
+test("index creation completes before settings are applied", async () => {
+  const { client, requests } = indexSettingsClient({});
+  assert.equal((await applySearchIndexSettings(client)).ok, true);
+  assert.equal(requests[0], "/indexes");
+  assert.equal(requests[1]?.endsWith("/settings"), true);
+});
+
+test("failed index creation prevents settings, and failed settings report failure", async () => {
+  const createFailure = indexSettingsClient({ create: "failed" });
+  const createResult = await applySearchIndexSettings(createFailure.client);
+  assert.equal(createResult.ok, false);
+  assert.match(createResult.reason, /creation task failed/i);
+  assert.deepEqual(createFailure.requests, ["/indexes"]);
+
+  const settingsFailure = indexSettingsClient({ existing: 200, settings: "failed" });
+  const settingsResult = await applySearchIndexSettings(settingsFailure.client);
+  assert.equal(settingsResult.ok, false);
+  assert.match(settingsResult.reason, /settings task failed/i);
+  assert.equal(settingsFailure.requests.length, 1);
+  assert.equal(settingsFailure.requests[0]?.endsWith("/settings"), true);
 });
 
 test("searchDatabaseProducts only ever returns ACTIVE listings, respects filters/sort/pagination", async () => {

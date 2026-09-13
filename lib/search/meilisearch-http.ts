@@ -21,6 +21,64 @@ const SEARCHABLE_ATTRIBUTES = ["name", "brand", "category", "productType", "sear
 const FILTERABLE_ATTRIBUTES = ["brand", "category", "productType", "status", "condition"];
 const SORTABLE_ATTRIBUTES = ["price", "createdAt"];
 
+type TaskResult = { ok: boolean; status: string };
+type TaskWaiter = (taskUid: number) => Promise<TaskResult>;
+type MutationTask = { taskUid?: unknown };
+
+type IndexSettingsClient = {
+  fetch: typeof meiliFetch;
+  request: typeof meiliRequest;
+  wait: TaskWaiter;
+};
+
+async function confirmTask(task: MutationTask, wait: TaskWaiter = waitForMeiliTask): Promise<TaskResult> {
+  if (typeof task.taskUid !== "number" || !Number.isInteger(task.taskUid)) {
+    return { ok: false, status: "missing task uid" };
+  }
+  return wait(task.taskUid);
+}
+
+/** Confirms a mutation response, treating a missing delete target as already synchronized. */
+export async function waitForMutationResponse(
+  response: Response,
+  wait: TaskWaiter = waitForMeiliTask
+): Promise<boolean> {
+  if (response.status === 404) return true;
+  if (!response.ok) return false;
+  const task = await response.json() as MutationTask;
+  return (await confirmTask(task, wait)).ok;
+}
+
+/** Injectable index orchestration used directly by focused task-ordering tests. */
+export async function applySearchIndexSettings(
+  client: IndexSettingsClient
+): Promise<{ ok: boolean; reason: string }> {
+  const existing = await client.fetch(indexPath());
+  if (!existing.ok && existing.status !== 404) {
+    throw new MeilisearchError(`Unexpected status checking index: ${existing.status}`);
+  }
+  if (existing.status === 404) {
+    const createTask = await client.request<MutationTask>("/indexes", {
+      method: "POST",
+      body: { uid: getIndexUid(), primaryKey: "id" },
+    });
+    const created = await confirmTask(createTask, client.wait);
+    if (!created.ok) return { ok: false, reason: `Index creation task ${created.status}.` };
+  }
+
+  const settingsTask = await client.request<MutationTask>(indexPath("/settings"), {
+    method: "PATCH",
+    body: {
+      searchableAttributes: SEARCHABLE_ATTRIBUTES,
+      filterableAttributes: FILTERABLE_ATTRIBUTES,
+      sortableAttributes: SORTABLE_ATTRIBUTES,
+    },
+  });
+  const settings = await confirmTask(settingsTask, client.wait);
+  if (!settings.ok) return { ok: false, reason: `Index settings task ${settings.status}.` };
+  return { ok: true, reason: "Index settings applied." };
+}
+
 /**
  * Creates the index if it doesn't exist yet and applies explicit
  * searchable/filterable/sortable settings — deliberately never seeds any
@@ -32,24 +90,11 @@ export async function ensureSearchIndexSettings(): Promise<{ ok: boolean; reason
   }
 
   try {
-    const existing = await meiliFetch(indexPath());
-    if (!existing.ok && existing.status !== 404) {
-      throw new MeilisearchError(`Unexpected status checking index: ${existing.status}`);
-    }
-    if (!existing.ok) {
-      await meiliRequest("/indexes", { method: "POST", body: { uid: getIndexUid(), primaryKey: "id" } });
-    }
-
-    await meiliRequest(indexPath("/settings"), {
-      method: "PATCH",
-      body: {
-        searchableAttributes: SEARCHABLE_ATTRIBUTES,
-        filterableAttributes: FILTERABLE_ATTRIBUTES,
-        sortableAttributes: SORTABLE_ATTRIBUTES,
-      },
+    return await applySearchIndexSettings({
+      fetch: meiliFetch,
+      request: meiliRequest,
+      wait: waitForMeiliTask,
     });
-
-    return { ok: true, reason: "Index settings applied." };
   } catch (error) {
     console.error("[search] ensureSearchIndexSettings failed:", error);
     return { ok: false, reason: error instanceof MeilisearchError ? error.message : "Unexpected error." };
@@ -76,14 +121,14 @@ export async function syncListingSearch(listing: BikePartListing): Promise<boole
       const response = await meiliFetch(indexPath(`/documents/${encodeURIComponent(listing.id)}`), {
         method: "DELETE",
       });
-      return response.ok || response.status === 404;
+      return waitForMutationResponse(response);
     }
 
-    const response = await meiliFetch(indexPath("/documents"), {
+    const task = await meiliRequest<MutationTask>(indexPath("/documents"), {
       method: "POST",
       body: [toSearchDocument(listing)],
     });
-    return response.ok;
+    return (await confirmTask(task)).ok;
   } catch (error) {
     // The DB row remains saved and is simply marked unsynced — see
     // lib/actions/admin-products-core.ts and scripts/reconcile-search.ts.
@@ -97,7 +142,7 @@ export async function deleteListingSearchDocument(id: string): Promise<boolean> 
   if (!isMeilisearchConfigured()) return false;
   try {
     const response = await meiliFetch(indexPath(`/documents/${encodeURIComponent(id)}`), { method: "DELETE" });
-    return response.ok || response.status === 404;
+    return await waitForMutationResponse(response);
   } catch (error) {
     console.error("[search] deleteListingSearchDocument failed for", id, error);
     return false;

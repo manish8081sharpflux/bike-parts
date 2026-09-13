@@ -51,14 +51,18 @@ export function parseLimit(raw: string | null): number {
 // loosened later.
 const SAFE_FACET_VALUE = /^[\w &.,'-]{1,80}$/;
 
+export function parseFacetValue(raw: string | null): string | null {
+  if (!raw) return null;
+  const value = raw.trim();
+  return value && SAFE_FACET_VALUE.test(value) ? value : null;
+}
+
 function escapeFilterValue(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
 /** Returns a single validated `field = "value"` filter clause, or null if the input isn't a plausible facet value. */
-export function buildFacetFilter(field: "category" | "brand", raw: string | null): string | null {
-  if (!raw) return null;
-  const value = raw.trim();
+export function buildFacetFilter(field: "category" | "brand", value: string | null): string | null {
   if (!value || !SAFE_FACET_VALUE.test(value)) return null;
   return `${field} = "${escapeFilterValue(value)}"`;
 }
@@ -73,16 +77,10 @@ export type ParsedSearchParams = {
 };
 
 export function parseSearchParams(searchParams: URLSearchParams): ParsedSearchParams {
-  const rawCategory = searchParams.get("category");
-  const rawBrand = searchParams.get("brand");
   return {
     q: parseQuery(searchParams.get("q")),
-    // Kept as plain trimmed strings here for the DB fallback (which uses a
-    // parameterized Prisma `equals`, not a hand-built filter string) —
-    // buildFacetFilter's allowlist is applied only where a raw filter
-    // string is actually being constructed, i.e. the Meilisearch path.
-    category: rawCategory && rawCategory.trim() ? rawCategory.trim().slice(0, 80) : null,
-    brand: rawBrand && rawBrand.trim() ? rawBrand.trim().slice(0, 80) : null,
+    category: parseFacetValue(searchParams.get("category")),
+    brand: parseFacetValue(searchParams.get("brand")),
     sort: parseSort(searchParams.get("sort")),
     page: parsePage(searchParams.get("page")),
     limit: parseLimit(searchParams.get("limit")),

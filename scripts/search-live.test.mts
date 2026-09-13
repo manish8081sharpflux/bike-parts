@@ -59,8 +59,6 @@ async function fetchIndexedDocument(id: string) {
   return response.status === 200 ? await response.json() : null;
 }
 
-const settle = () => new Promise((resolve) => setTimeout(resolve, 500));
-
 test("preconditions: Meilisearch is configured and reachable in this process", async () => {
   assert.equal(isMeilisearchConfigured(), true);
   assert.equal(await pingMeilisearch(), true);
@@ -75,7 +73,6 @@ test("syncListingSearch indexes an ACTIVE listing and it becomes searchable", as
   const listing = await makeListing({ name: `Findable Sync ${suffix}` });
   assert.equal(await syncListingSearch(listing), true);
 
-  await settle();
   assert.ok(await fetchIndexedDocument(listing.id));
   const results = await searchMeilisearchIndex(`Findable Sync ${suffix}`, { limit: 10, offset: 0 });
   assert.ok(results.hits.some((hit) => hit.id === listing.id));
@@ -84,13 +81,10 @@ test("syncListingSearch indexes an ACTIVE listing and it becomes searchable", as
 test("archiving a previously-indexed listing and syncing removes its document â€” stale results cannot remain", async () => {
   const listing = await makeListing({ name: `Stale Removal ${suffix}` });
   assert.equal(await syncListingSearch(listing), true);
-  await settle();
   assert.ok(await fetchIndexedDocument(listing.id));
 
   const archived = await prisma.bikePartListing.update({ where: { id: listing.id }, data: { status: "ARCHIVED" } });
   assert.equal(await syncListingSearch(archived), true);
-  await settle();
-
   assert.equal(await fetchIndexedDocument(listing.id), null);
   const results = await searchMeilisearchIndex(`Stale Removal ${suffix}`, { limit: 10, offset: 0 });
   assert.equal(results.hits.some((hit) => hit.id === listing.id), false);
@@ -99,13 +93,10 @@ test("archiving a previously-indexed listing and syncing removes its document â€
 test("deleteListingSearchDocument removes a hard-deleted product's document", async () => {
   const listing = await makeListing({ name: `Hard Delete ${suffix}` });
   assert.equal(await syncListingSearch(listing), true);
-  await settle();
-
   await prisma.bikePartListing.delete({ where: { id: listing.id } });
   listingIds.splice(listingIds.indexOf(listing.id), 1);
 
   assert.equal(await deleteListingSearchDocument(listing.id), true);
-  await settle();
   assert.equal(await fetchIndexedDocument(listing.id), null);
 });
 
