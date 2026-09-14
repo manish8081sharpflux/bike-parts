@@ -5,7 +5,7 @@
 import { MapPin } from "lucide-react";
 import type { Product } from "@/lib/storefront-catalog";
 import type { Address, Order, OrderEventEntry, OrderStatus, PartialRefundStatus, PartialReturnStatus, RefundStatus, ReturnStatus } from "./types";
-import { addressIcons, riderRoster, stepIndexForStatus } from "./constants";
+import { addressIcons } from "./constants";
 import { parsePrice, formatPrice } from "./format";
 
 // Re-exported so every file that already imports these from "./utils"
@@ -84,6 +84,7 @@ export const loadRazorpayCheckout = () => {
 /** Maps the backend's OrderStatus enum to this UI's simpler status vocabulary. */
 
 export const mapDbOrderStatus = (status: string): OrderStatus => {
+  if (status === "SHIPPED") return "shipped";
   if (status === "OUT_FOR_DELIVERY") return "out_for_delivery";
   if (status === "DELIVERED") return "delivered";
   if (status === "CANCELLED") return "cancelled";
@@ -150,78 +151,42 @@ export const formatAddressLines = (address: Address) => {
 };
 
 
-export const extractEventStatus = (event: OrderEventEntry): string | null => {
-  if (event.type === "ORDER_PLACED") return "PENDING";
-  if (event.type === "DISPATCHED") return "SHIPPED";
-  const match = /Status changed to (\w+)/.exec(event.message);
-  return match ? match[1] : null;
-};
-
-/**
- * Real timestamp for when an order first reached a tracking step, from its
- * activity log — falls back to a guessed offset from `placedAt` when there's
- * no event history yet (e.g. the demo orders shown before a real fetch
- * resolves, or an order whose events haven't loaded).
- */
-
-export const findStepTime = (
-  events: OrderEventEntry[] | undefined,
-  matches: (rawStatus: string) => boolean,
-  fallback: number
-): number => {
-  const candidates = (events ?? [])
-    .map((event) => ({ event, rawStatus: extractEventStatus(event) }))
-    .filter((entry): entry is { event: OrderEventEntry; rawStatus: string } => entry.rawStatus !== null)
-    .filter((entry) => matches(entry.rawStatus))
-    .sort((a, b) => a.event.createdAt - b.event.createdAt);
-  return candidates[0]?.event.createdAt ?? fallback;
-};
-
-
-export const getRiderForOrder = (order: Order) => {
-  const seed = order.id.split("").reduce((sum, char) => sum + char.charCodeAt(0), 0);
-  const rider = riderRoster[seed % riderRoster.length];
-  return {
-    ...rider,
-    rating: (4.6 + (seed % 4) / 10).toFixed(1),
-    deliveries: 1800 + ((seed * 37) % 2200),
-    distanceKm: (1.2 + (seed % 5)).toFixed(1),
-  };
-};
-
-
 export const parseEstimateDayRange = (estimate: string) => {
-  const rangeMatch = estimate.match(/(\d+)\s*-\s*(\d+)/);
+  const rangeMatch = estimate.match(/^(?:Delivery in\s+)?(\d+)\s*[-?]\s*(\d+)\s+days?$/i);
   if (rangeMatch) {
     return { min: Number(rangeMatch[1]), max: Number(rangeMatch[2]) };
   }
 
-  const singleMatch = estimate.match(/(\d+)/);
+  const singleMatch = estimate.match(/^(?:Delivery in\s+)?(\d+)\s+days?$/i);
   if (singleMatch) {
     const days = Number(singleMatch[1]);
     return { min: days, max: days };
   }
 
-  return { min: 2, max: 4 };
+  return null;
 };
 
 
 export const computeExpectedDeliveryLabel = (placedAt: number, deliveryEstimate: string) => {
   const dayMs = 24 * 60 * 60 * 1000;
-  const { min, max } = parseEstimateDayRange(deliveryEstimate);
+  const range = parseEstimateDayRange(deliveryEstimate);
+  if (!range || !Number.isFinite(placedAt) || range.min < 0 || range.max < range.min || range.max > 365) return null;
+  const { min, max } = range;
   const minDate = new Date(placedAt + min * dayMs);
   const maxDate = new Date(placedAt + max * dayMs);
 
   if (min === max) {
     return maxDate.toLocaleDateString("en-IN", {
+      timeZone: "Asia/Kolkata",
       day: "numeric",
       month: "short",
       year: "numeric",
     });
   }
 
-  const minLabel = minDate.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+  const minLabel = minDate.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short" });
   const maxLabel = maxDate.toLocaleDateString("en-IN", {
+    timeZone: "Asia/Kolkata",
     day: "numeric",
     month: "short",
     year: "numeric",

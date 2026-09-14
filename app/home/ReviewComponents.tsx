@@ -53,8 +53,8 @@ export function PurchaseReviewEditor({ orderId, orderItemId, productName, review
       <fieldset disabled={saving}>
         <legend className="sr-only">Rating (required)</legend>
         <div className="flex gap-2">
-          {[1, 2, 3, 4, 5].map((star) => <label key={star} className="cursor-pointer">
-            <input className="peer sr-only" type="radio" name={`rating-${id}`} value={star} required checked={rating === star} onChange={() => setRating(star)} aria-label={`${star} ${star === 1 ? "star" : "stars"}`} />
+          {[1, 2, 3, 4, 5].map((star) => <label key={star} className="relative cursor-pointer">
+            <input className="peer absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0" type="radio" name={`rating-${id}`} value={star} required checked={rating === star} onChange={() => setRating(star)} aria-label={`${star} ${star === 1 ? "star" : "stars"}`} />
             <Star aria-hidden="true" className={`size-8 rounded peer-focus-visible:outline-2 peer-focus-visible:outline-orange-500 ${star <= rating ? "fill-amber-400 text-amber-500" : "text-zinc-400"}`} />
           </label>)}
         </div>

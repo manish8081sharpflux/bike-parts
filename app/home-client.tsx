@@ -53,18 +53,15 @@ import {
 import {
   computeExpectedDeliveryLabel,
   formatAddressLines,
-  formatClockTime,
   formatPrice,
   getAddressIcon,
   getProductDisplayMeta,
-  getRiderForOrder,
   loadRazorpayCheckout,
   mapDbOrderStatus,
   mapDbPartialRefundStatus,
   mapDbPartialReturnStatus,
   mapDbRefundStatus,
   mapDbReturnStatus,
-  parseEstimateDayRange,
   parsePrice,
 } from "./home/utils";
 import { BrandLogo, BrandSelectionModal, ModelSelectionModal, BikePartsModal } from "./home/BrandModals";
@@ -75,7 +72,6 @@ import {
   OrderMiniTracker,
   OrderListRow,
   OrdersListPage,
-  DeliveryRouteMap,
   OrderDetailView,
 } from "./home/OrderComponents";
 import { SocialIcon, AccountMenu } from "./home/LayoutComponents";
@@ -83,88 +79,6 @@ import { CatalogView } from "./home/CatalogView";
 
 export function HomeClient({ products }: { products: Product[] }) {
   const findProduct = (name: string) => products.find((item) => item.name === name);
-
-  const buildOrderLine = (name: string, quantity: number): CartLine | null => {
-    const product = findProduct(name);
-    return product ? { product, quantity } : null;
-  };
-
-  /**
-   * Returns null (dropped by initialOrders below) if none of this mock
-   * order's product names exist in the live catalog. These are decorative
-   * sample orders shown only until the real /api/orders fetch resolves, so
-   * the refund fields a real order carries are always defaulted to "paid,
-   * nothing refund-related going on" rather than threaded through every
-   * call site below.
-   */
-  const buildMockOrder = (
-    overrides: Omit<
-      Order,
-      | "itemTotal"
-      | "taxAmount"
-      | "total"
-      | "dbId"
-      | "isPaid"
-      | "refundStatus"
-      | "refundReason"
-      | "refundAdminNote"
-      | "refundAmount"
-      | "refundRequestedAt"
-      | "refundProcessedAt"
-      | "returnStatus"
-      | "returnReason"
-      | "returnAdminNote"
-      | "returnRequestedAt"
-      | "returnShippingProvider"
-      | "returnShippingTrackingUrl"
-      | "returnShippingAwbCode"
-      | "returnShippingCourierName"
-      | "returnReceivedAt"
-      | "partialReturns"
-      | "shippingProvider"
-      | "shippingStatus"
-      | "shippingTrackingUrl"
-      | "shippingAwbCode"
-      | "shippingCourierName"
-    > & { deliveryCharge: number; discount: number }
-  ): Order | null => {
-    if (overrides.items.length === 0) return null;
-
-    const itemTotal = overrides.items.reduce(
-      (sum, line) => sum + parsePrice(line.product.price) * line.quantity,
-      0
-    );
-
-    return {
-      ...overrides,
-      dbId: overrides.id,
-      isPaid: true,
-      shippingProvider: null,
-      shippingStatus: null,
-      shippingTrackingUrl: null,
-      shippingAwbCode: null,
-      shippingCourierName: null,
-      refundStatus: "none",
-      refundReason: null,
-      refundAdminNote: null,
-      refundAmount: null,
-      refundRequestedAt: null,
-      refundProcessedAt: null,
-      returnStatus: "none",
-      returnReason: null,
-      returnAdminNote: null,
-      returnRequestedAt: null,
-      returnShippingProvider: null,
-      returnShippingTrackingUrl: null,
-      returnShippingAwbCode: null,
-      returnShippingCourierName: null,
-      returnReceivedAt: null,
-      partialReturns: [],
-      itemTotal,
-      taxAmount: 0,
-      total: itemTotal + overrides.deliveryCharge - overrides.discount,
-    };
-  };
 
   // "Best Sellers" / "New Arrivals" — top-rated and newest-first slices of
   // the real catalog (getStorefrontProducts already orders `products` newest
@@ -178,76 +92,6 @@ export function HomeClient({ products }: { products: Product[] }) {
     [products]
   );
   const newArrivalProducts = useMemo(() => products.slice(0, 10), [products]);
-
-  // Demo "recent orders" shown before a real fetch from /api/orders resolves
-  // (see refreshOrders below). Any line/order referencing a product name
-  // that isn't in the live catalog is silently dropped rather than crashing.
-  const initialOrders: Order[] = useMemo(() => {
-    const homeAddress = initialAddresses[0];
-    // No fixture addresses: real orders load via refreshOrders.
-    if (!homeAddress) return [];
-    const resolvedItems = (lines: Array<CartLine | null>) =>
-      lines.filter((line): line is CartLine => line !== null);
-
-    return [
-      buildMockOrder({
-        id: "48015301",
-        placedAt: new Date("2026-06-05T17:16:00").getTime(),
-        status: "delivered",
-        statusNote: "Your order was delivered on 05 Jun 2026, 5:16 PM",
-        expectedDeliveryDate: null,
-        bikeLabel: "Hero HF Deluxe (2024)",
-        items: resolvedItems([
-          buildOrderLine("Cam Chain", 1),
-          buildOrderLine("Clutch Plate Set", 1),
-          buildOrderLine("Engine Oil Filter", 1),
-        ]),
-        deliveryCharge: 50,
-        discount: 50,
-        address: homeAddress,
-      }),
-      buildMockOrder({
-        id: "48012988",
-        placedAt: new Date("2026-05-28T11:23:00").getTime(),
-        status: "out_for_delivery",
-        statusNote: "Your order is out for delivery",
-        expectedDeliveryDate: "30 May 2026",
-        bikeLabel: "Hero HF Deluxe (2024)",
-        items: resolvedItems([buildOrderLine("Engine Oil Filter", 1), buildOrderLine("Spark Plug (NGK)", 1)]),
-        deliveryCharge: 50,
-        discount: 0,
-        address: homeAddress,
-      }),
-      buildMockOrder({
-        id: "48009654",
-        placedAt: new Date("2026-05-24T14:10:00").getTime(),
-        status: "processing",
-        statusNote: "Your order is being prepared",
-        expectedDeliveryDate: computeExpectedDeliveryLabel(
-          new Date("2026-05-24T14:10:00").getTime(),
-          homeAddress.deliveryEstimate
-        ),
-        bikeLabel: "Hero HF Deluxe (2024)",
-        items: resolvedItems([buildOrderLine("Air Filter", 1), buildOrderLine("Oil Seal Set", 1)]),
-        deliveryCharge: 0,
-        discount: 0,
-        address: homeAddress,
-      }),
-      buildMockOrder({
-        id: "48001120",
-        placedAt: new Date("2026-05-12T15:40:00").getTime(),
-        status: "cancelled",
-        statusNote: "Your order has been cancelled on 12 May 2026, 3:40 PM",
-        expectedDeliveryDate: null,
-        bikeLabel: "Hero HF Deluxe (2024)",
-        items: resolvedItems([buildOrderLine("Engine Mount", 1)]),
-        deliveryCharge: 0,
-        discount: 0,
-        address: homeAddress,
-      }),
-    ].filter((order): order is Order => order !== null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [products]);
 
   const [isBrandModalOpen, setIsBrandModalOpen] = useState(false);
   const [isModelModalOpen, setIsModelModalOpen] = useState(false);
@@ -308,7 +152,7 @@ export function HomeClient({ products }: { products: Product[] }) {
   );
   const [isAddressFormOpen, setIsAddressFormOpen] = useState(false);
   const [editingAddressId, setEditingAddressId] = useState<string | null>(null);
-  const [orders, setOrders] = useState<Order[]>(initialOrders);
+  const [orders, setOrders] = useState<Order[]>([]);
   const [isOrdersPanelOpen, setIsOrdersPanelOpen] = useState(false);
   const [viewedOrderId, setViewedOrderId] = useState<string | null>(null);
   const viewedOrder = orders.find((order) => order.id === viewedOrderId) ?? null;
@@ -1007,6 +851,7 @@ export function HomeClient({ products }: { products: Product[] }) {
       const response = await fetch("/api/orders");
       if (!response.ok) return;
       const data = (await response.json()) as {
+        support?: { supportEmail: string | null; supportPhone: string | null };
         orders: Array<{
           id: string;
           placedAt: number;
@@ -1018,6 +863,8 @@ export function HomeClient({ products }: { products: Product[] }) {
           deliveryCharge: number;
           discount: number;
           amount: number;
+          shippingOrderId: string | null;
+          shippingShipmentId: string | null;
           shippingProvider: "PORTER" | "SHIPROCKET" | null;
           shippingStatus: string | null;
           shippingTrackingUrl: string | null;
@@ -1109,6 +956,7 @@ export function HomeClient({ products }: { products: Product[] }) {
             product: products.find((entry) => entry.id === item.listingId) ?? productFromSnapshot(item),
             orderItemId: item.id, listingId: item.listingId, canReview: item.canReview, review: item.review,
             quantity: item.quantity,
+            unitPrice: item.unitPrice,
             returnedQuantity: item.returnedQuantity,
             remainingReturnable: item.remainingReturnable,
           }));
@@ -1117,7 +965,7 @@ export function HomeClient({ products }: { products: Product[] }) {
 
           const status = mapDbOrderStatus(dbOrder.status);
           const addr = dbOrder.deliveryAddress ?? {};
-          const deliveryEstimate = addr.deliveryEstimate ?? "Delivery in 2-4 days";
+          const deliveryEstimate = addr.deliveryEstimate ?? "";
 
           return {
             id: dbOrder.id.slice(-8),
@@ -1125,6 +973,10 @@ export function HomeClient({ products }: { products: Product[] }) {
             placedAt: dbOrder.placedAt,
             status,
             isPaid: dbOrder.paymentStatus === "PAID",
+            shippingOrderId: dbOrder.shippingOrderId,
+            shippingShipmentId: dbOrder.shippingShipmentId,
+            supportEmail: data.support?.supportEmail,
+            supportPhone: data.support?.supportPhone,
             shippingProvider: dbOrder.shippingProvider,
             shippingStatus: dbOrder.shippingStatus,
             shippingTrackingUrl: dbOrder.shippingTrackingUrl,

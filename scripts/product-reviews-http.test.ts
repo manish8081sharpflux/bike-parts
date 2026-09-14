@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHmac, randomBytes } from "node:crypto";
 import test, { before, after } from "node:test";
 import { chromium, expect } from "@playwright/test";
 import { prisma } from "@/lib/db";
@@ -19,15 +20,16 @@ async function request(path: string, method = "GET", body?: unknown, auth = true
 const endpoint = (order: { id: string; itemId: string }) => `/api/orders/${order.id}/items/${order.itemId}/review`;
 
 before(async () => {
-  const phone = `978${String(Date.now()).slice(-7)}`;
-  const sent = await request("/api/auth/otp/send", "POST", { phone }, false);
-  const otp = await sent.json();
-  assert.equal(sent.status, 200, "Development OTP request failed");
-  assert.ok(otp.developmentOtp, "These tests require a development server with development OTPs");
-  const login = await request("/api/auth/otp/verify", "POST", { phone, otp: otp.developmentOtp }, false);
-  assert.equal(login.status, 200);
-  cookie = login.headers.getSetCookie().map((value) => value.split(";")[0]).join("; ");
-  userId = (await prisma.user.findUniqueOrThrow({ where: { phone } })).id;
+  assert.ok(["localhost", "127.0.0.1"].includes(new URL(base).hostname), "Fixture sessions are only allowed against a local test server");
+  const phone = `000${String(Date.now()).slice(-7)}`;
+  userId = (await prisma.user.create({ data: { phone, name: suffix } })).id;
+  const token = randomBytes(32).toString("base64url");
+  const secret = process.env.CUSTOMER_OTP_HASH_SECRET || "development-only-customer-otp-secret";
+  await prisma.customerSession.create({ data: {
+    userId, tokenHash: createHmac("sha256", secret).update(`session:${token}`).digest("hex"),
+    expiresAt: new Date(Date.now() + 10 * 60_000),
+  } });
+  cookie = `bikeparts_customer_session=${token}`;
   listingId = (await prisma.bikePartListing.create({ data: {
     name: suffix, slug: suffix, brand: "Honda", category: "Engine", price: 100, stock: 10,
     rating: 5, deliveryDaysMin: 2, deliveryDaysMax: 4,

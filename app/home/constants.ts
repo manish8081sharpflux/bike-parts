@@ -483,6 +483,7 @@ export const orderStatusMeta: Record<
     iconClassName: "bg-amber-50 text-amber-600",
     bannerClassName: "bg-amber-50 text-amber-700",
   },
+  shipped: { label: "Shipped", icon: Truck, iconClassName: "bg-orange-50 text-orange-600", bannerClassName: "bg-orange-50 text-orange-700" },
   out_for_delivery: {
     label: "Out for Delivery",
     icon: Truck,
@@ -504,24 +505,19 @@ export const orderStatusMeta: Record<
 };
 
 
-export const orderTrackingSteps = ["Order Placed", "Preparing", "Out for Delivery", "Delivered"];
+export const orderTrackingSteps = ["Order Placed", "Preparing", "Shipped", "Out for Delivery", "Delivered"];
 
 /** Which tracking step (0-based) each order status has just reached. Cancelled orders skip the stepper entirely. */
 
 export const stepIndexForStatus: Partial<Record<OrderStatus, number>> = {
   processing: 1,
-  out_for_delivery: 2,
-  delivered: 3,
+  shipped: 2,
+  out_for_delivery: 3,
+  delivered: 4,
 };
 
 /** The raw DB OrderStatus a status-change event recorded, if any — parsed from the messages admin-orders.ts writes ("Status changed to X...", "Shipment created via Shiprocket..."). */
 
-export const riderRoster = [
-  { name: "Ravi Kumar", initials: "RK" },
-  { name: "Suresh Yadav", initials: "SY" },
-  { name: "Amit Singh", initials: "AS" },
-  { name: "Vikram Rana", initials: "VR" },
-];
 
 /** Deterministic mock rider for an order — stable across renders since it's derived from the order id. */
 
@@ -543,6 +539,7 @@ export const DEFAULT_MAP_CENTER = { lat: 25.5941, lon: 85.1376 }; // Patna
 export const orderStatusFilters: Array<{ key: OrderStatus | "all"; label: string }> = [
   { key: "all", label: "All Orders" },
   { key: "processing", label: "Preparing" },
+  { key: "shipped", label: "Shipped" },
   { key: "out_for_delivery", label: "Out for Delivery" },
   { key: "delivered", label: "Delivered" },
   { key: "cancelled", label: "Cancelled" },
@@ -562,8 +559,9 @@ export const WAREHOUSE_CITY = "Patna";
  */
 
 export const orderStatusHeadline: Record<OrderStatus, string> = {
-  processing: "Your order is being prepared!",
-  out_for_delivery: "Your order is on the way!",
+  processing: "Your order is being prepared",
+  shipped: "Your order is on the way!",
+  out_for_delivery: "Your order is out for delivery!",
   delivered: "Your order has been delivered!",
   cancelled: "Your order was cancelled",
 };

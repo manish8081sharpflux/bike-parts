@@ -52,6 +52,7 @@ declare global {
 export type CartLine = {
   product: Product;
   quantity: number;
+  unitPrice?: number;
   orderItemId?: string;
   listingId?: string | null;
   canReview?: boolean;
@@ -82,7 +83,7 @@ export type Address = {
 };
 
 
-export type OrderStatus = "processing" | "out_for_delivery" | "delivered" | "cancelled";
+export type OrderStatus = "processing" | "shipped" | "out_for_delivery" | "delivered" | "cancelled";
 
 /** One entry from the order's real activity log (see OrderEvent in the DB) — used to give the tracking stepper real timestamps instead of guessed offsets. Absent for the demo orders shown before a real fetch resolves. */
 
@@ -144,6 +145,15 @@ export type Order = {
   status: OrderStatus;
   statusNote: string;
   expectedDeliveryDate: string | null;
+  shippingOrderId?: string | null;
+  shippingShipmentId?: string | null;
+  /** Optional provider values. Leave absent until supplied and stored by an integration. */
+  shippingEstimatedDeliveryAt?: string | null;
+  shippingLastUpdatedAt?: string | null;
+  deliveryExecutiveName?: string | null;
+  deliveryExecutivePhone?: string | null;
+  supportEmail?: string | null;
+  supportPhone?: string | null;
   bikeLabel: string;
   items: CartLine[];
   itemTotal: number;
@@ -155,7 +165,7 @@ export type Order = {
   events?: OrderEventEntry[];
   /** Whether this order was actually paid for — a refund only ever makes sense against a paid order. */
   isPaid: boolean;
-  /** Real, provider-backed forward-shipment info — "PORTER" only ever appears on historical orders dispatched before the Shiprocket migration (see the Prisma ShippingProvider enum). Used to decide whether to show real tracking info instead of the demo rider/map (see OrderComponents.tsx). */
+  /** Real, provider-backed forward-shipment info — "PORTER" only ever appears on historical orders dispatched before the Shiprocket migration (see the Prisma ShippingProvider enum). Used by provider-neutral shipment cards. */
   shippingProvider: "PORTER" | "SHIPROCKET" | null;
   shippingStatus: string | null;
   shippingTrackingUrl: string | null;

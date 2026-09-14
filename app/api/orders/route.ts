@@ -27,7 +27,9 @@ export async function GET() {
     take: 50,
   });
 
+  const support = await prisma.storeSettings.findUnique({ where: { id: "singleton" }, select: { supportEmail: true, supportPhone: true } });
   return NextResponse.json({
+    support,
     orders: orders.map((order) => {
       // Non-REJECTED returned quantity per item, used both to disable
       // reordering past the purchased quantity in the return UI and to show
@@ -52,6 +54,8 @@ export async function GET() {
         discount: Number(order.discount),
         amount: Number(order.amount),
         deliveryAddress: order.deliveryAddress,
+        shippingOrderId: order.shippingOrderId,
+        shippingShipmentId: order.shippingShipmentId,
         shippingProvider: order.shippingProvider,
         shippingStatus: order.shippingStatus,
         shippingTrackingUrl: order.shippingTrackingUrl,

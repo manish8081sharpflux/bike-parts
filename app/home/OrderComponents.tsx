@@ -1,22 +1,20 @@
 "use client";
 
+import { OrderStatusCard, ShipmentDetails, ShipmentTracking } from "./ShipmentComponents";
+import { formatTrackingDate, safeTrackingUrl } from "@/lib/order-tracking";
 import { PurchaseReviewEditor } from "./ReviewComponents";
 
 import { useState } from "react";
 import Image from "next/image";
 import { ArrowRight, Banknote, Bike, CheckCircle2, ChevronLeft, ChevronRight, FileText, Gift, HelpCircle, Home as HomeIcon, Loader2, MessageCircle, Package, Phone, RotateCw, Star, Store, Trash2, Zap } from "lucide-react";
 import type { Order, OrderStatus } from "./types";
-import { coordinatesForCity } from "@/lib/city-coordinates";
-import DeliveryMap from "./DeliveryMapDynamic";
 import {
   orderStatusMeta,
   orderTrackingSteps,
   stepIndexForStatus,
   orderStatusFilters,
-  WAREHOUSE_CITY,
-  orderStatusHeadline,
 } from "./constants";
-import { getAddressIcon, formatAddressLines, getRiderForOrder, formatClockTime, findStepTime, parsePrice, formatPrice } from "./utils";
+import { getAddressIcon, formatAddressLines, parsePrice, formatPrice } from "./utils";
 
 export function OrderMiniTracker({ order }: { order: Order }) {
   const currentStepIndex = stepIndexForStatus[order.status];
@@ -68,7 +66,7 @@ export function OrderListRow({
   const meta = orderStatusMeta[order.status];
   const StatusIcon = meta.icon;
   const itemCount = order.items.reduce((sum, item) => sum + item.quantity, 0);
-  const isActive = order.status === "processing" || order.status === "out_for_delivery";
+  const isActive = order.status === "processing" || order.status === "shipped" || order.status === "out_for_delivery";
   const firstProduct = order.items[0]?.product;
   const dateLabel = new Date(order.placedAt).toLocaleDateString("en-IN", {
     weekday: "short",
@@ -115,7 +113,7 @@ export function OrderListRow({
           <>
             <span className="inline-flex items-center gap-1.5 text-sm font-black text-emerald-600">
               <Bike className="size-4" />
-              {order.status === "out_for_delivery" ? "Out for delivery" : "Preparing your order"}
+              {order.status === "out_for_delivery" ? "Out for delivery" : order.status === "shipped" ? "Shipped" : "Preparing your order"}
             </span>
             <OrderMiniTracker order={order} />
           </>
@@ -312,52 +310,6 @@ export function OrdersListPage({
 // since this is a client component and that var isn't (and shouldn't be)
 // public.
 
-export function DeliveryRouteMap({ rider, order }: { rider: ReturnType<typeof getRiderForOrder>; order: Order }) {
-  const pickup = coordinatesForCity(WAREHOUSE_CITY);
-  const drop = coordinatesForCity(order.address.city);
-
-  return (
-    <div className="overflow-hidden rounded-xl border border-zinc-100 bg-[#eef1ec] shadow-sm">
-      <div className="relative h-[320px] w-full sm:h-[420px]">
-        <span className="absolute right-3 top-3 z-[500] inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-[10px] font-black text-zinc-950 shadow">
-          <span className="relative flex size-1.5">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
-            <span className="relative inline-flex size-1.5 rounded-full bg-red-500" />
-          </span>
-          TRACKING
-        </span>
-
-        <DeliveryMap
-          pickup={pickup}
-          pickupLabel={`Dispatched from ${WAREHOUSE_CITY}`}
-          drop={drop}
-          dropLabel={order.address.area || order.address.city}
-          className="z-0"
-        />
-
-        <div className="absolute inset-x-3 bottom-3 z-[500] flex items-center gap-3 rounded-xl bg-white p-3 shadow-lg">
-          <span className="grid size-9 shrink-0 place-items-center rounded-full bg-[#fff0eb] text-[#ff4b1f]">
-            <Bike className="size-4.5" />
-          </span>
-          <span className="min-w-0">
-            <span className="block truncate text-xs font-bold text-[#070e2b]">
-              {rider.name} is {rider.distanceKm} km away from you
-            </span>
-            <span className="block text-[11px] text-zinc-500">
-              Expected by <span className="font-bold text-emerald-600">{order.expectedDeliveryDate}</span>
-            </span>
-          </span>
-        </div>
-      </div>
-
-      <p className="border-t border-zinc-100 bg-white px-3 py-2 text-center text-[10px] text-zinc-400">
-        Approximate route by city — live rider GPS isn&apos;t connected yet.
-      </p>
-    </div>
-  );
-}
-
-
 export function OrderDetailView({
   order,
   onReviewSaved,
@@ -394,28 +346,11 @@ export function OrderDetailView({
   const [partialReturnReasonDraft, setPartialReturnReasonDraft] = useState("");
   const [partialReturnQuantities, setPartialReturnQuantities] = useState<Record<string, number>>({});
   const [isCancelConfirmOpen, setIsCancelConfirmOpen] = useState(false);
-  const currentStepIndex = stepIndexForStatus[order.status];
-  const isOutForDelivery = order.status === "out_for_delivery";
   const isDelivered = order.status === "delivered";
   const isCancelled = order.status === "cancelled";
-  const rider = getRiderForOrder(order);
-  // Real timestamps from the order's activity log when available (falls back
-  // to a guessed offset from placedAt for the demo orders / while events
-  // haven't loaded yet — see findStepTime).
-  const stepTimes = [
-    order.placedAt,
-    findStepTime(order.events, (raw) => raw !== "PENDING", order.placedAt + 7 * 60000),
-    findStepTime(order.events, (raw) => raw === "OUT_FOR_DELIVERY", order.placedAt + 15 * 60000),
-    findStepTime(order.events, (raw) => raw === "DELIVERED", order.placedAt + 40 * 60000),
-  ];
-
-  const statusSubtext = isCancelled
-    ? { text: order.statusNote, className: "text-red-600" }
-    : isDelivered
-    ? { text: order.statusNote, className: "text-emerald-600" }
-    : isOutForDelivery
-    ? { text: `Expected by ${order.expectedDeliveryDate}`, className: "text-emerald-600" }
-    : { text: order.statusNote, className: "text-amber-600" };
+  const trackingUrl = safeTrackingUrl(order.shippingTrackingUrl);
+  const supportUrl = order.supportEmail ? `mailto:${order.supportEmail}?subject=Order%20${encodeURIComponent(order.dbId)}` : order.supportPhone ? `tel:${order.supportPhone.replace(/[^+\d]/g, "")}` : null;
+  const canReturn = order.isPaid && isDelivered && ((order.returnStatus === "none" || order.returnStatus === "rejected") || order.items.some(item => (item.remainingReturnable ?? 0) > 0));
 
   return (
     <div className="min-h-[calc(100vh-64px)] w-full bg-zinc-50 px-4 py-6 sm:px-6 lg:px-14 lg:py-8">
@@ -428,76 +363,11 @@ export function OrderDetailView({
         My Orders
       </button>
 
-      <div
-        className={
-          isOutForDelivery
-            ? "mx-auto grid w-full max-w-[1400px] gap-5 lg:grid-cols-[1fr_380px]"
-            : "mx-auto w-full max-w-2xl"
-        }
-      >
-        <div className="space-y-5">
-          {/* Status + tracker card */}
-          <div className="rounded-xl border border-zinc-100 bg-white p-5 shadow-sm">
-            <div className="flex items-start justify-between gap-3">
-              <h2 className="text-xl font-black leading-tight text-[#070e2b] sm:text-2xl">
-                {orderStatusHeadline[order.status]}
-              </h2>
-              {!isCancelled && !isDelivered ? (
-                <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-black text-emerald-700">
-                  <Zap className="size-3.5" />
-                  On time
-                </span>
-              ) : null}
-            </div>
-            <p className={`mt-1 text-sm font-bold ${statusSubtext.className}`}>{statusSubtext.text}</p>
-
-            {!isCancelled && currentStepIndex !== undefined ? (
-              <div className="mt-6 flex items-start justify-between">
-                {orderTrackingSteps.map((step, index) => {
-                  const done = isDelivered || index < currentStepIndex;
-                  const isCurrent = !isDelivered && index === currentStepIndex;
-                  const StepIcon = index === 2 ? Bike : HomeIcon;
-
-                  return (
-                    <div key={step} className="flex flex-1 flex-col items-center text-center last:flex-none">
-                      <div className="flex w-full items-center">
-                        <span
-                          className={`grid size-9 shrink-0 place-items-center rounded-full text-white ${
-                            done || isCurrent ? "bg-[#ff4b1f]" : "bg-zinc-200 text-zinc-400"
-                          }`}
-                        >
-                          {done ? <CheckCircle2 className="size-4.5" /> : <StepIcon className="size-4.5" />}
-                        </span>
-                        {index < orderTrackingSteps.length - 1 ? (
-                          <span
-                            className={`mx-1 h-1 flex-1 rounded-full ${
-                              index < currentStepIndex || isDelivered ? "bg-[#ff4b1f]" : "bg-zinc-200"
-                            }`}
-                          />
-                        ) : null}
-                      </div>
-                      <span
-                        className={`mt-2 text-[11px] font-bold leading-tight ${
-                          done || isCurrent ? "text-[#070e2b]" : "text-zinc-400"
-                        }`}
-                      >
-                        {step}
-                      </span>
-                      <span className="mt-0.5 text-[10px] text-zinc-400">
-                        {done || isCurrent ? formatClockTime(stepTimes[index]) : ""}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : null}
-
-            {isCancelled ? (
-              <div className="mt-4 rounded-lg bg-red-50 px-4 py-3 text-xs font-medium text-red-700">
-                If you have any questions, please contact our support team.
-              </div>
-            ) : null}
-          </div>
+      <div className="mx-auto grid w-full max-w-[1400px] min-w-0 gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="min-w-0 space-y-5">
+          <OrderStatusCard order={order} />
+          <div className="lg:hidden"><ShipmentTracking order={order} /></div>
+          <ShipmentDetails order={order} />
 
           {/*
             Return card — where the customer starts a return and tracks it
@@ -510,7 +380,7 @@ export function OrderDetailView({
             confirms the returned item is back at the warehouse.
           */}
           {order.isPaid && (isDelivered || order.returnStatus !== "none") ? (
-            <div className="rounded-xl border border-zinc-100 bg-white p-5 shadow-sm">
+            <div id="order-return-card" className="rounded-xl border border-zinc-100 bg-white p-5 shadow-sm">
               <h3 className="flex items-center gap-2 text-sm font-black text-[#070e2b]">
                 <RotateCw className="size-4.5 text-zinc-500" />
                 Return
@@ -842,74 +712,6 @@ export function OrderDetailView({
             </div>
           ) : null}
 
-          {/*
-            Shipment card — real, provider-backed tracking info (courier,
-            AWB, status, tracking link) once a shipment actually exists.
-            Never shown alongside the demo rider/map card below: this app
-            has no live rider GPS feed, so once a real shipment exists we
-            show what's actually true (courier + AWB + status) instead of a
-            fabricated "N km away" rider position.
-          */}
-          {isOutForDelivery && order.shippingProvider ? (
-            <div className="rounded-xl border border-zinc-100 bg-white p-5 shadow-sm">
-              <h3 className="text-sm font-black text-[#070e2b]">
-                {order.shippingCourierName ? `Shipped via ${order.shippingCourierName}` : "Your order has shipped"}
-              </h3>
-              {order.shippingAwbCode ? (
-                <p className="mt-1 text-xs text-zinc-500">
-                  AWB: <span className="font-mono font-bold text-zinc-700">{order.shippingAwbCode}</span>
-                </p>
-              ) : null}
-              <p className="mt-2 text-xs font-bold text-emerald-600">
-                Expected by {order.expectedDeliveryDate}
-              </p>
-              {order.shippingTrackingUrl ? (
-                <a
-                  href={order.shippingTrackingUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="mt-3 flex h-9 w-full items-center justify-center gap-1.5 rounded-lg border border-zinc-200 text-xs font-bold text-zinc-700 transition hover:bg-zinc-50"
-                >
-                  Track Shipment ↗
-                </a>
-              ) : null}
-            </div>
-          ) : null}
-
-          {/* Demo rider card — shown only when there's no real, provider-backed shipment yet (see the Shipment card above), since this app has no live rider GPS feed to back it with. */}
-          {isOutForDelivery && !order.shippingProvider ? (
-            <div className="rounded-xl border border-zinc-100 bg-white p-5 shadow-sm">
-              <h3 className="text-sm font-black text-[#070e2b]">Your rider is on the way</h3>
-              <div className="mt-3 flex items-center gap-3">
-                <span className="grid size-14 shrink-0 place-items-center rounded-full bg-[#fff0eb] text-lg font-black text-[#ff4b1f]">
-                  {rider.initials}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block text-base font-black text-[#070e2b]">{rider.name}</span>
-                  <span className="flex items-center gap-1 text-xs text-zinc-500">
-                    <Star className="size-3 fill-amber-400 text-amber-400" />
-                    {rider.rating} &bull; {rider.deliveries.toLocaleString("en-IN")}+ deliveries
-                  </span>
-                  <span className="mt-0.5 block text-xs text-zinc-500">Your parts are in safe hands!</span>
-                </span>
-                <span className="flex shrink-0 items-center gap-4">
-                  <a href="tel:+911234567890" aria-label={`Call ${rider.name}`} className="flex flex-col items-center gap-1">
-                    <span className="grid size-11 place-items-center rounded-full border border-zinc-200 text-zinc-700 transition hover:border-[#ff4b1f] hover:text-[#ff4b1f]">
-                      <Phone className="size-4.5" />
-                    </span>
-                    <span className="text-[11px] font-bold text-zinc-600">Call</span>
-                  </a>
-                  <button type="button" aria-label={`Chat with ${rider.name}`} className="flex flex-col items-center gap-1">
-                    <span className="grid size-11 place-items-center rounded-full border border-zinc-200 text-zinc-700 transition hover:border-[#ff4b1f] hover:text-[#ff4b1f]">
-                      <MessageCircle className="size-4.5" />
-                    </span>
-                    <span className="text-[11px] font-bold text-zinc-600">Chat</span>
-                  </button>
-                </span>
-              </div>
-            </div>
-          ) : null}
-
           {/* Items + bill card */}
           <div id="order-items-card" className="scroll-mt-24 rounded-xl border border-zinc-100 bg-white p-5 shadow-sm">
             <div className="flex items-center justify-between gap-3 border-b border-zinc-100 pb-4">
@@ -924,11 +726,12 @@ export function OrderDetailView({
               </span>
               <span className="shrink-0 text-xs font-bold text-zinc-500">
                 Order #{order.id}
+                <span className="mt-1 block text-[10px] font-normal">Placed on {formatTrackingDate(order.placedAt, true)}</span>
               </span>
             </div>
 
             <div className="mt-4 space-y-3">
-              {order.items.map(({ product, quantity, orderItemId, canReview, review }) => (
+              {order.items.map(({ product, quantity, unitPrice, orderItemId, canReview, review }) => (
                 <div key={orderItemId ?? product.name}>
                 <div className="flex items-center gap-3">
                   <CheckCircle2 className="size-4 shrink-0 fill-emerald-100 text-emerald-600" />
@@ -937,7 +740,7 @@ export function OrderDetailView({
                   </span>
                   <span className="shrink-0 text-xs text-zinc-500">&times; {quantity}</span>
                   <span className="shrink-0 text-sm font-black text-[#070e2b]">
-                    &#8377;{formatPrice(parsePrice(product.price) * quantity)}
+                    &#8377;{formatPrice((unitPrice ?? parsePrice(product.price)) * quantity)}
                   </span>
                 </div>
                 {orderItemId && (canReview || review) ? <PurchaseReviewEditor orderId={order.dbId} orderItemId={orderItemId} productName={product.name} review={review ?? null} onSaved={onReviewSaved} /> : null}
@@ -1056,56 +859,19 @@ export function OrderDetailView({
           ) : null}
         </div>
 
-        {isOutForDelivery ? (
-          <div className="space-y-5">
-            {/* Only the demo fallback (no real shipment yet) gets the approximate city-to-city map — a real Shiprocket/Porter shipment shows actual courier/AWB/tracking in the Shipment card instead (see above), never a fabricated rider position. */}
-            {!order.shippingProvider ? <DeliveryRouteMap rider={rider} order={order} /> : null}
-
-            <div className="divide-y divide-zinc-100 rounded-xl border border-zinc-100 bg-white shadow-sm">
-              {[
-                { icon: HelpCircle, title: "Need help with your order?", caption: "Get instant support" },
-                {
-                  icon: FileText,
-                  title: "View order details",
-                  caption: `Order ID: #${order.id}`,
-                  // Jumps down to the itemized bill card on this same page
-                  // rather than navigating anywhere — there's no separate
-                  // "order details" destination, this page already is one.
-                  onClick: () =>
-                    document.getElementById("order-items-card")?.scrollIntoView({ behavior: "smooth" }),
-                },
-              ].map((item) => (
-                <button
-                  type="button"
-                  key={item.title}
-                  onClick={item.onClick}
-                  className="flex w-full items-center gap-3 px-4 py-3.5 text-left transition hover:bg-zinc-50"
-                >
-                  <item.icon className="size-4.5 shrink-0 text-zinc-500" />
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-sm font-bold text-[#070e2b]">{item.title}</span>
-                    <span className="block truncate text-xs text-zinc-500">{item.caption}</span>
-                  </span>
-                  <ChevronRight className="size-4 shrink-0 text-zinc-300" />
-                </button>
-              ))}
+        <aside className="min-w-0 space-y-5">
+          <div className="hidden lg:block"><ShipmentTracking order={order} /></div>
+          <section aria-label="Order help" className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
+            <h3 className="text-base font-bold text-[#070e2b]">Need help with your order?</h3>
+            <div className="mt-4 flex flex-col gap-3 text-sm font-semibold">
+              {trackingUrl ? <a href={trackingUrl} target="_blank" rel="noreferrer" className="rounded-lg border border-zinc-200 p-3 text-center">Track my order</a> : null}
+              {canReturn ? <button type="button" onClick={() => document.getElementById("order-return-card")?.scrollIntoView({ behavior: "smooth" })} className="rounded-lg border border-zinc-200 p-3">Return or exchange</button> : null}
+              {supportUrl ? <a href={supportUrl} className="rounded-lg border border-zinc-200 p-3 text-center">Contact support</a> : <button type="button" disabled className="rounded-lg border border-zinc-200 p-3 text-zinc-400" title="Support contact details have not been configured">Contact support</button>}
+              <button type="button" disabled className="rounded-lg border border-zinc-200 p-3 text-zinc-400" title="Invoices are not available in this store yet">View invoice</button>
+              <button type="button" onClick={() => document.getElementById("order-items-card")?.scrollIntoView({ behavior: "smooth" })} className="text-xs text-orange-700 underline">View order details</button>
             </div>
-
-            <div className="flex items-center gap-3 rounded-xl border border-[#ffd9c7] bg-[#fff0eb] p-4">
-              <Gift className="size-6 shrink-0 text-[#ff4b1f]" />
-              <span className="min-w-0 flex-1">
-                <span className="block text-sm font-black text-[#ff4b1f]">Share your love for Deep Automobiles!</span>
-                <span className="block text-xs text-zinc-600">Rate your order and rider</span>
-              </span>
-              <button
-                type="button"
-                className="shrink-0 rounded-full border border-[#ff4b1f] px-3 py-1.5 text-xs font-black text-[#ff4b1f] transition hover:bg-white"
-              >
-                Rate Now
-              </button>
-            </div>
-          </div>
-        ) : null}
+          </section>
+        </aside>
       </div>
     </div>
   );
