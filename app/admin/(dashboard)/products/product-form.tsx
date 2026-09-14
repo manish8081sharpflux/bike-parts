@@ -11,7 +11,11 @@ import { SUBCATEGORIES_BY_CATEGORY } from "@/lib/product-subcategories";
 import { parsePackageContent, type Specification, type CompatibleVehicle } from "@/lib/products/product-details";
 
 const BRANDS = ["Honda", "Hero", "TVS", "Bajaj", "Yamaha", "Royal Enfield", "Suzuki", "KTM", "Jawa", "Aprilia", "Kawasaki", "BMW"];
-const CATEGORIES = ["Engine", "Brake System", "Electrical", "Suspension", "Body Parts", "Tyres & Wheels", "Fuel System", "Lighting", "Seat & Comfort", "Handlebar & Controls", "Chain & Sprocket", "Exhaust System"];
+// Suggestions only, not an enum — Category is a free-text combobox (see
+// CategoryCombobox below) so a brand-new spare-part category never needs a
+// code change. Keep this list and SUBCATEGORIES_BY_CATEGORY's keys roughly
+// aligned so every curated category has matching subcategory suggestions.
+const CATEGORIES = ["Engine", "Brake System", "Electrical", "Suspension", "Body Parts", "Tyres & Wheels", "Fuel System", "Lighting", "Seat & Comfort", "Handlebar & Controls", "Chain & Sprocket", "Exhaust System", "Accessories"];
 type Values = {
   name?: string; brand?: string; category?: string; productType?: string | null; description?: string;
   price?: string | number; gstRate?: string | number; stock?: number; status?: string;
@@ -20,6 +24,7 @@ type Values = {
   features?: string[]; packageContents?: string[]; packIncludes?: string | null; searchTags?: string[];
   material?: string | null; finish?: string | null; weightKg?: string | number | null;
   warrantyMonths?: number | null; countryOfOrigin?: string | null; offerLabel?: string | null;
+  deliveryDaysMin?: number | string | null; deliveryDaysMax?: number | string | null;
 };
 const inputClass = "w-full min-w-0 rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-sm font-normal text-zinc-900 shadow-sm outline-none transition placeholder:text-zinc-400 focus:border-[#ff4b1f] focus:ring-2 focus:ring-orange-100 disabled:bg-zinc-50 file:mr-3 file:rounded-lg file:border-0 file:bg-orange-50 file:px-3 file:py-1 file:text-xs file:font-semibold file:text-orange-700";
 const buttonClass = "rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-700 transition hover:border-orange-200 hover:bg-orange-50 hover:text-orange-700 focus-visible:outline-2 focus-visible:outline-[#ff4b1f]";
@@ -162,6 +167,58 @@ function Select({
     </div>
   );
 }
+/**
+ * A free-text field with suggestions — unlike Select above, any value can be
+ * typed, not just one from `options`. Used for Category and Subcategory so
+ * a genuinely new spare-part category/type never needs a code change; the
+ * suggestions (a native <datalist>, the same combobox pattern already used
+ * for compatible-vehicle brand/model in Rows below) just make the common,
+ * already-curated cases fast to pick.
+ */
+function Combobox({
+  label,
+  name,
+  options,
+  value,
+  onChange,
+  disabled,
+  placeholder,
+  required,
+}: {
+  label: string;
+  name: string;
+  options: string[];
+  value: string;
+  onChange?: (value: string) => void;
+  disabled?: boolean;
+  placeholder?: string;
+  required?: boolean;
+}) {
+  const listId = `${name}-options`;
+  return (
+    <label className="flex min-w-0 flex-col gap-1 text-sm font-semibold text-zinc-700">
+      <span>{label}{required ? <span className="ml-1 text-[#e63e16]">*</span> : null}</span>
+      <input
+        name={name}
+        list={listId}
+        value={value}
+        disabled={disabled}
+        required={required}
+        placeholder={placeholder}
+        onChange={(event) => onChange?.(event.target.value)}
+        className={inputClass}
+        autoComplete="off"
+      />
+      {options.length ? (
+        <datalist id={listId}>
+          {options.map((option) => (
+            <option key={option} value={option} />
+          ))}
+        </datalist>
+      ) : null}
+    </label>
+  );
+}
 type Column = { key: string; label: string; placeholder?: string };
 function Rows({ name, columns, initial, addLabel, vehicle = false }: {
   name: string; columns: Column[]; initial: Record<string, string>[]; addLabel: string; vehicle?: boolean;
@@ -216,30 +273,33 @@ export function ProductForm({ action, defaultValues: v = {}, submitLabel }: {
       <Field label="Product name" name="name" placeholder="e.g. Chain & Sprocket Kit" required defaultValue={v.name} />
       <div className="grid gap-3 sm:grid-cols-2">
         <Select label="Bike" name="brand" options={BRANDS} value={v.brand ?? ""} />
-        <Select
+        <Combobox
           label="Category"
           name="category"
           options={CATEGORIES}
           value={category}
+          required
+          placeholder="Pick a category or type a new one"
           onChange={(next) => {
             setCategory(next);
             // A subcategory value left over from the previous category
             // (e.g. "Brake Pads" while switching Brake System → Engine)
             // wouldn't make sense anymore — clear it rather than silently
-            // keep an invalid combination.
+            // keep an invalid combination. Only auto-clears when the new
+            // category has its own curated suggestions that don't include
+            // it; a still-relevant free-typed value is left alone.
             const validOptions = SUBCATEGORIES_BY_CATEGORY[next] ?? [];
-            if (!validOptions.includes(subcategory)) setSubcategory("");
+            if (validOptions.length > 0 && !validOptions.includes(subcategory)) setSubcategory("");
           }}
         />
       </div>
-      <Select
+      <Combobox
         label="Subcategory"
         name="productType"
         options={subcategoryOptions}
         value={subcategory}
         onChange={setSubcategory}
-        disabled={!category}
-        placeholder={category ? "Select…" : "Pick a category first"}
+        placeholder="Pick a subcategory or type a new one"
       />
       <label className="flex flex-col gap-1 text-sm font-semibold text-zinc-700">Description<textarea name="description" defaultValue={v.description} rows={4} placeholder="Describe the part, its purpose and what makes it a good fit." className={inputClass} /></label>
     </Section>
@@ -304,6 +364,8 @@ export function ProductForm({ action, defaultValues: v = {}, submitLabel }: {
         <Field label="Warranty (months)" name="warrantyMonths" type="number" min={0} step={1} defaultValue={v.warrantyMonths ?? ""} />
         <Field label="Country of Origin" name="countryOfOrigin" defaultValue={v.countryOfOrigin ?? ""} />
         <Field label="Offer Badge" name="offerLabel" defaultValue={v.offerLabel ?? ""} />
+        <Field label="Delivery Days (min)" name="deliveryDaysMin" type="number" min={0} step={1} defaultValue={v.deliveryDaysMin ?? ""} />
+        <Field label="Delivery Days (max)" name="deliveryDaysMax" type="number" min={0} step={1} defaultValue={v.deliveryDaysMax ?? ""} />
       </div>
     </details>
     <SaveBar label={submitLabel} />

@@ -1,5 +1,5 @@
 import type { BikePartListing } from "@prisma/client";
-import { specificationsSchema, vehiclesSchema, type Specification, type CompatibleVehicle } from "@/lib/products/product-details";
+import { safeParseSpecifications, safeParseVehicles, type Specification, type CompatibleVehicle } from "@/lib/products/product-details";
 import { prisma } from "@/lib/db";
 
 /** Shape the storefront UI (app/home-client.tsx) renders — mapped from a `BikePartListing` DB row. */
@@ -53,8 +53,8 @@ export function mapListingToProduct(listing: BikePartListing): Product {
     sku: listing.sku,
     oemPartNumber: listing.oemPartNumber,
     productType: listing.productType,
-    specifications: specificationsSchema.parse(listing.specifications ?? []),
-    compatibleVehicles: vehiclesSchema.parse(listing.compatibleVehicles ?? []),
+    specifications: safeParseSpecifications(listing.specifications),
+    compatibleVehicles: safeParseVehicles(listing.compatibleVehicles),
     features: listing.features ?? [],
     searchTags: listing.searchTags ?? [],
     material: listing.material,

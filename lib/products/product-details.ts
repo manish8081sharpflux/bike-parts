@@ -36,6 +36,23 @@ export const packageContentsSchema = z.array(packageContentSchema).max(100)
 export type Specification = z.infer<typeof specificationsSchema>[number];
 export type CompatibleVehicle = z.infer<typeof vehiclesSchema>[number];
 
+/**
+ * Reads a DB-stored JSON field (specifications/compatibleVehicles) for
+ * *display* — unlike readProductDetails below (which is for the admin form
+ * submitting new data and should reject anything malformed), this must
+ * never throw: an older row, a manually-edited DB value, or any other
+ * unexpected shape should just render as "no data" instead of crashing the
+ * storefront or the admin edit page for every product on the page.
+ */
+export function safeParseSpecifications(raw: unknown): Specification[] {
+  const result = specificationsSchema.safeParse(raw ?? []);
+  return result.success ? result.data : [];
+}
+export function safeParseVehicles(raw: unknown): CompatibleVehicle[] {
+  const result = vehiclesSchema.safeParse(raw ?? []);
+  return result.success ? result.data : [];
+}
+
 export function readProductDetails(formData: FormData) {
   function parse<T>(key: string, schema: z.ZodType<T>): T {
     let input: unknown;

@@ -297,6 +297,83 @@ test("createProduct: successful upload stores the fake backend's URL on the prod
   assert.match(listing.imageUrl ?? "", /^https:\/\/fake-bucket\.example\.com\//);
 });
 
+test("createProduct: rejects zero and negative price", async () => {
+  await assert.rejects(() => createProduct(productForm({ price: "0" })), /greater than 0/);
+  await assert.rejects(() => createProduct(productForm({ price: "-5" })), /greater than 0/);
+});
+
+test("createProduct: rejects delivery days where min is greater than max", async () => {
+  const formData = productForm();
+  formData.set("deliveryDaysMin", "10");
+  formData.set("deliveryDaysMax", "3");
+  await assert.rejects(() => createProduct(formData), /cannot be greater than maximum/);
+});
+
+test("createProduct: accepts a brand-new, previously unused category and subcategory with no code change", async (t) => {
+  const fake = createFakeBackend();
+  setStorageBackendForTests(fake.backend);
+  t.after(() => setStorageBackendForTests(null));
+
+  const formData = productForm({ name: "Test Side Stand", category: "Stands" });
+  formData.set("productType", "Side Stand");
+  const listing = await createProduct(formData);
+  productIds.push(listing.id);
+  assert.equal(listing.category, "Stands");
+  assert.equal(listing.productType, "Side Stand");
+});
+
+test("createProduct then updateProduct: round-trips dynamic specifications, features, and package contents unmodified", async (t) => {
+  const fake = createFakeBackend();
+  setStorageBackendForTests(fake.backend);
+  t.after(() => setStorageBackendForTests(null));
+
+  const formData = productForm({ name: "Test Battery", category: "Electrical" });
+  formData.set("productType", "Battery");
+  formData.set("specifications", JSON.stringify([
+    { name: "Voltage", value: "12V" },
+    { name: "Capacity", value: "5Ah" },
+    { name: "Battery Type", value: "Maintenance Free" },
+  ]));
+  formData.set("features", JSON.stringify([{ value: "Long life" }, { value: "Leak proof" }]));
+  formData.set("packageContents", JSON.stringify([{ quantity: "1", product: "Battery" }, { quantity: "1", product: "User Manual" }]));
+
+  const listing = await createProduct(formData);
+  productIds.push(listing.id);
+  assert.deepEqual(listing.specifications, [
+    { name: "Voltage", value: "12V" },
+    { name: "Capacity", value: "5Ah" },
+    { name: "Battery Type", value: "Maintenance Free" },
+  ]);
+  assert.deepEqual(listing.features, ["Long life", "Leak proof"]);
+  assert.equal(listing.packIncludes, "1 X Battery, 1 X User Manual");
+
+  const updateForm = productForm({ name: "Test Battery Updated", category: "Electrical" });
+  updateForm.set("specifications", JSON.stringify([{ name: "Voltage", value: "24V" }]));
+  const updated = await updateProduct(listing.id, updateForm);
+  assert.deepEqual(updated.specifications, [{ name: "Voltage", value: "24V" }]);
+});
+
+test("createProduct: rejects a duplicate SKU, updateProduct rejects reusing another product's SKU", async (t) => {
+  const fake = createFakeBackend();
+  setStorageBackendForTests(fake.backend);
+  t.after(() => setStorageBackendForTests(null));
+
+  const withSku = productForm({ name: "SKU Holder" });
+  withSku.set("sku", "DUP-SKU-1");
+  const firstWithSku = await createProduct(withSku);
+  productIds.push(firstWithSku.id);
+
+  const dupe = productForm({ name: "SKU Dupe" });
+  dupe.set("sku", "DUP-SKU-1");
+  await assert.rejects(() => createProduct(dupe), /already used by another product/);
+
+  const second = await createProduct(productForm({ name: "SKU Other" }));
+  productIds.push(second.id);
+  const updateForm = productForm({ name: "SKU Other" });
+  updateForm.set("sku", "DUP-SKU-1");
+  await assert.rejects(() => updateProduct(second.id, updateForm), /already used by another product/);
+});
+
 test("createProduct: upload failure leaves no product row behind", async (t) => {
   const fake = createFakeBackend();
   setStorageBackendForTests(fake.backend);

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { updateProductAction } from "@/lib/actions/admin-products";
-import { specificationsSchema, vehiclesSchema } from "@/lib/products/product-details";
+import { safeParseSpecifications, safeParseVehicles } from "@/lib/products/product-details";
 import { ProductForm } from "../product-form";
 
 export const dynamic = "force-dynamic";
@@ -56,8 +56,8 @@ export default async function EditProductPage({
             sku: product.sku,
             oemPartNumber: product.oemPartNumber,
             productType: product.productType,
-            specifications: specificationsSchema.parse(product.specifications ?? []),
-            compatibleVehicles: vehiclesSchema.parse(product.compatibleVehicles ?? []),
+            specifications: safeParseSpecifications(product.specifications),
+            compatibleVehicles: safeParseVehicles(product.compatibleVehicles),
             features: product.features,
             packageContents: product.packageContents,
             searchTags: product.searchTags,
@@ -68,6 +68,8 @@ export default async function EditProductPage({
             warrantyMonths: product.warrantyMonths,
             countryOfOrigin: product.countryOfOrigin,
             offerLabel: product.offerLabel,
+            deliveryDaysMin: product.deliveryDaysMin,
+            deliveryDaysMax: product.deliveryDaysMax,
             compatibleModels: product.compatibleModels,
             status: product.status,
           }}

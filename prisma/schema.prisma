@@ -182,7 +182,7 @@ model BikePartListing {
   images           String[]         @default([])
   // Product-detail-page fields — everything the customer-facing product
   // page shows beyond the core listing info above.
-  sku              String?
+  sku              String?          @unique
   oemPartNumber    String?
   productType      String?
   specifications   Json             @default("[]")

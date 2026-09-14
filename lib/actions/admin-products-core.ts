@@ -23,7 +23,20 @@ import {
   type UploadedImage,
 } from "@/lib/storage/product-images";
 import { assertGalleryCountWithinLimit } from "@/lib/storage/image-validation";
+import { Prisma } from "@prisma/client";
 import type { ListingStatus } from "@prisma/client";
+
+/** Turns a Prisma unique-constraint violation on `sku` into a clean, actionable message instead of a raw P2002 error. */
+function rethrowFriendlyDbError(error: unknown): never {
+  if (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === "P2002" &&
+    (error.meta?.target as string[] | undefined)?.includes("sku")
+  ) {
+    throw new Error("This SKU is already used by another product. Use a different SKU or leave it blank.");
+  }
+  throw error;
+}
 
 const LISTING_STATUSES: ListingStatus[] = ["DRAFT", "ACTIVE", "RESERVED", "SOLD", "ARCHIVED"];
 
@@ -81,6 +94,17 @@ function readOptionalText(formData: FormData, key: string): string | null {
   return String(formData.get(key) ?? "").trim() || null;
 }
 
+/** Accepts a site-relative path ("/assets/...") or an absolute http(s) URL — rejects garbage that would just render as a broken image. */
+function isPlausibleImageRef(value: string): boolean {
+  if (value.startsWith("/")) return true;
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 function readProductForm(formData: FormData) {
   const name = String(formData.get("name") ?? "").trim();
   const brand = String(formData.get("brand") ?? "").trim();
@@ -105,8 +129,8 @@ function readProductForm(formData: FormData) {
   if (!name || !brand || !category) {
     throw new Error("Name, brand, and category are required.");
   }
-  if (!Number.isFinite(price) || price < 0) {
-    throw new Error("Price must be a valid non-negative number.");
+  if (!Number.isFinite(price) || price <= 0) {
+    throw new Error("Price must be a valid number greater than 0.");
   }
   // The `price` column is Decimal(10,2) — anything ≥ 10^8 overflows it.
   // Without this check the Prisma write throws a raw Postgres
@@ -140,6 +164,27 @@ function readProductForm(formData: FormData) {
     throw new Error("Warranty must be a non-negative whole number.");
   }
 
+  const deliveryDaysMin = readOptionalNumber(formData, "deliveryDaysMin");
+  if (deliveryDaysMin !== null && (!Number.isInteger(deliveryDaysMin) || deliveryDaysMin < 0)) {
+    throw new Error("Minimum delivery days must be a non-negative whole number.");
+  }
+  const deliveryDaysMax = readOptionalNumber(formData, "deliveryDaysMax");
+  if (deliveryDaysMax !== null && (!Number.isInteger(deliveryDaysMax) || deliveryDaysMax < 0)) {
+    throw new Error("Maximum delivery days must be a non-negative whole number.");
+  }
+  if (deliveryDaysMin !== null && deliveryDaysMax !== null && deliveryDaysMin > deliveryDaysMax) {
+    throw new Error("Minimum delivery days cannot be greater than maximum delivery days.");
+  }
+
+  if (typedImageUrl && !isPlausibleImageRef(typedImageUrl)) {
+    throw new Error("Main Image URL must be a valid link (https://...) or a site-relative path (/assets/...).");
+  }
+  const images = readList(formData, "images");
+  const badImage = images.find((url) => !isPlausibleImageRef(url));
+  if (badImage) {
+    throw new Error(`"${badImage}" isn't a valid image URL — use a full https://... link or a site-relative path.`);
+  }
+
   return {
     name,
     brand,
@@ -149,7 +194,7 @@ function readProductForm(formData: FormData) {
     gstRate,
     stock,
     imageUrl: typedImageUrl,
-    images: readList(formData, "images"),
+    images,
     ...details,
     productType: readOptionalText(formData, "productType"),
     oemPartNumber: readOptionalText(formData, "oemPartNumber"),
@@ -163,6 +208,8 @@ function readProductForm(formData: FormData) {
     warrantyMonths: warrantyMonths !== null ? Math.round(warrantyMonths) : null,
     countryOfOrigin: readOptionalText(formData, "countryOfOrigin"),
     offerLabel: readOptionalText(formData, "offerLabel"),
+    deliveryDaysMin: deliveryDaysMin !== null ? Math.round(deliveryDaysMin) : null,
+    deliveryDaysMax: deliveryDaysMax !== null ? Math.round(deliveryDaysMax) : null,
     compatibleModels: [...new Set(details.compatibleVehicles.map((vehicle) => vehicle.model))],
     status,
   };
@@ -202,7 +249,7 @@ export async function createProduct(formData: FormData) {
   } catch (dbError) {
     const orphanKeys = [...(uploadedMain ? [uploadedMain.key] : []), ...uploadedGallery.map((image) => image.key)];
     await deleteProductImagesByKey(orphanKeys);
-    throw dbError;
+    rethrowFriendlyDbError(dbError);
   }
 
   if (await syncListingSearch(listing)) {
@@ -247,7 +294,7 @@ export async function updateProduct(id: string, formData: FormData) {
     // still-referenced ones are untouched since we haven't gotten here).
     const orphanKeys = [...(uploadedMain ? [uploadedMain.key] : []), ...uploadedGallery.map((image) => image.key)];
     await deleteProductImagesByKey(orphanKeys);
-    throw dbError;
+    rethrowFriendlyDbError(dbError);
   }
 
   // DB write succeeded — now it's safe to best-effort clean up whichever
