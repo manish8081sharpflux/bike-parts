@@ -159,6 +159,23 @@ function readProductForm(formData: FormData) {
     throw new Error("Weight must be less than 1000 kg.");
   }
 
+  // Shipping package dimensions — see lib/shipping/package.ts, which blocks
+  // shipment creation with a clear error naming the product when any of
+  // these are missing, rather than fabricating a value. `> 0` (not `>= 0`)
+  // since a zero-size dimension isn't a real package.
+  const lengthCm = readOptionalNumber(formData, "lengthCm");
+  const breadthCm = readOptionalNumber(formData, "breadthCm");
+  const heightCm = readOptionalNumber(formData, "heightCm");
+  for (const [label, value] of [["Length", lengthCm], ["Breadth", breadthCm], ["Height", heightCm]] as const) {
+    if (value !== null && value <= 0) {
+      throw new Error(`${label} must be greater than 0 cm.`);
+    }
+    // Decimal(6,2) — overflows at 10^4.
+    if (value !== null && value >= 10000) {
+      throw new Error(`${label} must be less than 10,000 cm.`);
+    }
+  }
+
   const warrantyMonths = readOptionalNumber(formData, "warrantyMonths");
   if (warrantyMonths !== null && (!Number.isInteger(warrantyMonths) || warrantyMonths < 0)) {
     throw new Error("Warranty must be a non-negative whole number.");
@@ -205,6 +222,9 @@ function readProductForm(formData: FormData) {
     finish: readOptionalText(formData, "finish"),
     packIncludes: details.packageContents.join(", ") || null,
     weightKg,
+    lengthCm,
+    breadthCm,
+    heightCm,
     warrantyMonths: warrantyMonths !== null ? Math.round(warrantyMonths) : null,
     countryOfOrigin: readOptionalText(formData, "countryOfOrigin"),
     offerLabel: readOptionalText(formData, "offerLabel"),

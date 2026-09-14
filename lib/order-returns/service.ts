@@ -1,7 +1,8 @@
-import { Prisma } from "@prisma/client";
+import { Prisma, type ShippingProvider } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import type { ReturnCondition } from "@/lib/order-return-state";
+import { isShiprocketReversePickedUp } from "@/lib/shipping/status-mapping";
 
 export class PartialReturnError extends Error {
   constructor(message: string, public status: number) { super(message); }
@@ -142,76 +143,89 @@ export async function rejectPartialReturn(returnId: string, adminNote: string) {
   });
 }
 
-/** Same DISPATCHING-placeholder claim pattern as claimReturnPickupDispatch (order-return-state.ts), scoped to one OrderReturn so two returns on the same order never collide on a single Porter shipment. */
-export async function claimPartialReturnPickupDispatch(returnId: string) {
+/** Same CREATING-placeholder claim pattern as claimReturnShippingDispatch (order-return-state.ts), scoped to one OrderReturn so two returns on the same order never collide on a single shipment. */
+export async function claimPartialReturnShippingDispatch(returnId: string) {
   const claim = await prisma.orderReturn.updateMany({
-    where: { id: returnId, status: "APPROVED", porterOrderId: null },
+    where: { id: returnId, status: "APPROVED", shippingOrderId: null },
     data: {
-      porterOrderId: "DISPATCHING",
-      porterAttemptedAt: new Date(),
-      porterReconciliationRequired: false,
-      porterLastError: null,
+      shippingOrderId: "CREATING",
+      shippingAttemptedAt: new Date(),
+      shippingReconciliationRequired: false,
+      shippingLastError: null,
     },
   });
   return claim.count === 1;
 }
 
-export async function completePartialReturnPickupDispatch(
-  returnId: string,
-  result: { porterOrderId: string; status: string; trackingUrl: string | null }
-) {
+export type PartialReturnShipmentResult = {
+  provider: ShippingProvider;
+  shippingOrderId: string;
+  shippingShipmentId: string | null;
+  awbCode: string | null;
+  courierName: string | null;
+  status: string;
+  trackingUrl: string | null;
+};
+
+export async function completePartialReturnShippingDispatch(returnId: string, result: PartialReturnShipmentResult) {
   return prisma.$transaction(async (tx) => {
     const completed = await tx.orderReturn.updateMany({
-      where: { id: returnId, porterOrderId: "DISPATCHING" },
+      where: { id: returnId, shippingOrderId: "CREATING" },
       data: {
         status: "PICKUP_SCHEDULED",
-        porterOrderId: result.porterOrderId,
-        porterStatus: result.status,
-        porterTrackingUrl: result.trackingUrl,
-        porterReconciliationRequired: false,
-        porterLastError: null,
+        shippingProvider: result.provider,
+        shippingOrderId: result.shippingOrderId,
+        shippingShipmentId: result.shippingShipmentId,
+        shippingAwbCode: result.awbCode,
+        shippingCourierName: result.courierName,
+        shippingStatus: result.status,
+        shippingTrackingUrl: result.trackingUrl,
+        shippingReconciliationRequired: false,
+        shippingLastError: null,
       },
     });
     if (completed.count !== 1) return false;
     const ret = await tx.orderReturn.findUniqueOrThrow({ where: { id: returnId }, select: { orderId: true } });
     await tx.orderEvent.create({
-      data: { orderId: ret.orderId, type: "PARTIAL_RETURN_PICKUP_DISPATCHED", message: `Return #${returnId.slice(-6)} pickup dispatched via Porter (order ${result.porterOrderId})` },
+      data: {
+        orderId: ret.orderId,
+        type: "PARTIAL_RETURN_SHIPMENT_CREATED",
+        message: `Return #${returnId.slice(-6)} shipment created via ${result.provider} (order ${result.shippingOrderId}${result.awbCode ? `, AWB ${result.awbCode}` : ""})`,
+      },
     });
     return true;
   });
 }
 
-/** Same definite-vs-uncertain split as failReturnPickupDispatch — an uncertain outcome leaves porterOrderId at "DISPATCHING" (blocking retries) and flags porterReconciliationRequired for manual verification. */
-export async function failPartialReturnPickupDispatch(returnId: string, failureMessage: string, uncertain: boolean) {
+/** Same definite-vs-uncertain split as failReturnShippingDispatch — an uncertain outcome leaves shippingOrderId at "CREATING" (blocking retries) and flags shippingReconciliationRequired for manual verification. */
+export async function failPartialReturnShippingDispatch(returnId: string, failureMessage: string, uncertain: boolean) {
   await prisma.$transaction(async (tx) => {
     const ret = await tx.orderReturn.findUniqueOrThrow({ where: { id: returnId }, select: { orderId: true } });
     if (uncertain) {
       await tx.orderReturn.updateMany({
-        where: { id: returnId, porterOrderId: "DISPATCHING" },
-        data: { porterStatus: "RECONCILIATION_REQUIRED", porterReconciliationRequired: true, porterLastError: failureMessage },
+        where: { id: returnId, shippingOrderId: "CREATING" },
+        data: { shippingStatus: "RECONCILIATION_REQUIRED", shippingReconciliationRequired: true, shippingLastError: failureMessage },
       });
       await tx.orderEvent.create({
-        data: { orderId: ret.orderId, type: "PARTIAL_RETURN_PICKUP_RECONCILIATION_REQUIRED", message: `Return #${returnId.slice(-6)} — ${failureMessage}` },
+        data: { orderId: ret.orderId, type: "PARTIAL_RETURN_SHIPMENT_RECONCILIATION_REQUIRED", message: `Return #${returnId.slice(-6)} — ${failureMessage}` },
       });
     } else {
       await tx.orderReturn.updateMany({
-        where: { id: returnId, porterOrderId: "DISPATCHING" },
-        data: { porterOrderId: null, porterStatus: null, porterLastError: failureMessage },
+        where: { id: returnId, shippingOrderId: "CREATING" },
+        data: { shippingOrderId: null, shippingStatus: null, shippingLastError: failureMessage },
       });
       await tx.orderEvent.create({
-        data: { orderId: ret.orderId, type: "PARTIAL_RETURN_PICKUP_DISPATCH_FAILED", message: `Return #${returnId.slice(-6)} — ${failureMessage}` },
+        data: { orderId: ret.orderId, type: "PARTIAL_RETURN_SHIPMENT_CREATE_FAILED", message: `Return #${returnId.slice(-6)} — ${failureMessage}` },
       });
     }
   });
 }
 
-export async function applyPartialReturnPorterStatus(returnId: string, rawStatus: string) {
+export async function applyPartialReturnShippingStatus(returnId: string, rawStatus: string) {
   return prisma.$transaction(async (tx) => {
-    await tx.orderReturn.update({ where: { id: returnId }, data: { porterStatus: rawStatus } });
+    await tx.orderReturn.update({ where: { id: returnId }, data: { shippingStatus: rawStatus } });
 
-    const value = rawStatus.toLowerCase().trim();
-    const isPickedUp = value.includes("delivered") || value.includes("completed") || value.includes("complete");
-    if (!isPickedUp) return { transitioned: false };
+    if (!isShiprocketReversePickedUp(rawStatus)) return { transitioned: false };
 
     const transitioned = await tx.orderReturn.updateMany({
       where: { id: returnId, status: "PICKUP_SCHEDULED" },
@@ -220,7 +234,7 @@ export async function applyPartialReturnPorterStatus(returnId: string, rawStatus
     if (transitioned.count === 1) {
       const ret = await tx.orderReturn.findUniqueOrThrow({ where: { id: returnId }, select: { orderId: true } });
       await tx.orderEvent.create({
-        data: { orderId: ret.orderId, type: "PARTIAL_RETURN_PICKED_UP", message: `Return #${returnId.slice(-6)} picked up (Porter status "${rawStatus}")` },
+        data: { orderId: ret.orderId, type: "PARTIAL_RETURN_PICKED_UP", message: `Return #${returnId.slice(-6)} picked up (shipping status "${rawStatus}")` },
       });
     }
     return { transitioned: transitioned.count === 1 };

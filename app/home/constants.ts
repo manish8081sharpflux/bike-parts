@@ -514,7 +514,7 @@ export const stepIndexForStatus: Partial<Record<OrderStatus, number>> = {
   delivered: 3,
 };
 
-/** The raw DB OrderStatus a status-change event recorded, if any — parsed from the messages admin-orders.ts writes ("Status changed to X...", "Dispatched via Porter..."). */
+/** The raw DB OrderStatus a status-change event recorded, if any — parsed from the messages admin-orders.ts writes ("Status changed to X...", "Shipment created via Shiprocket..."). */
 
 export const riderRoster = [
   { name: "Ravi Kumar", initials: "RK" },

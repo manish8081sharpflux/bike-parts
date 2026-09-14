@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { compareProductRatings } from "@/lib/reviews/types";
-import { Bike, Calendar, ChevronDown, Filter, Package, Search, SlidersHorizontal } from "lucide-react";
+import { Bike, Calendar, ChevronDown, Filter, Package, Search, SlidersHorizontal, X } from "lucide-react";
 import type { Product } from "@/lib/storefront-catalog";
 import { SUBCATEGORIES_BY_CATEGORY } from "@/lib/product-subcategories";
 import type { SortOption } from "./constants";
@@ -17,6 +17,15 @@ function expandYearRange(yearRange: string) {
   const start = Number(match[1]);
   const end = Number(match[2] ?? match[1]);
   return Array.from({ length: end - start + 1 }, (_, index) => String(end - index));
+}
+
+/** Shared match logic for both the navbar-driven search and the page-local one below — same fields either way. */
+function matchesSearchText(product: Product, query: string) {
+  return [product.name, product.brand, product.category, product.productType, product.oemPartNumber, product.sku, ...product.searchTags]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase()
+    .includes(query);
 }
 
 export function CatalogView({
@@ -71,6 +80,14 @@ export function CatalogView({
   const catalogCategories = Array.from(
     new Set(products.map((product) => product.category))
   );
+  // Page-local search: a collapsed icon next to the year filters that
+  // expands into a text field, narrowing only the products already listed
+  // on this catalog page — independent of the navbar's own search box
+  // (searchQuery/onSearchQueryChange above), which can switch category tabs
+  // or navigate away entirely.
+  const [isPageSearchOpen, setIsPageSearchOpen] = useState(false);
+  const [pageSearchQuery, setPageSearchQuery] = useState("");
+  const pageSearchInputRef = useRef<HTMLInputElement>(null);
   const [activePriceFilter, setActivePriceFilter] = useState<string | null>(null);
   const [sortOption, setSortOption] = useState<SortOption>("popularity");
   const [isFilterMenuOpen, setIsFilterMenuOpen] = useState(false);
@@ -119,14 +136,14 @@ export function CatalogView({
     }
 
     const matchesActiveCategory = products.some(
-      (product) => product.category === activeCategory && [product.name, product.brand, product.category, product.productType, product.oemPartNumber, product.sku, ...product.searchTags].filter(Boolean).join(" ").toLowerCase().includes(trimmedQuery)
+      (product) => product.category === activeCategory && matchesSearchText(product, trimmedQuery)
     );
 
     if (matchesActiveCategory) {
       return;
     }
 
-    const matchesAnyCategory = products.some((product) => [product.name, product.brand, product.category, product.productType, product.oemPartNumber, product.sku, ...product.searchTags].filter(Boolean).join(" ").toLowerCase().includes(trimmedQuery));
+    const matchesAnyCategory = products.some((product) => matchesSearchText(product, trimmedQuery));
 
     if (matchesAnyCategory) {
       onCategoryChange("");
@@ -142,9 +159,18 @@ export function CatalogView({
       )
     : categoryFiltered;
   const searchFiltered = trimmedQuery
-    ? priceFiltered.filter((product) => [product.name, product.brand, product.category, product.productType, product.oemPartNumber, product.sku, ...product.searchTags].filter(Boolean).join(" ").toLowerCase().includes(trimmedQuery))
+    ? priceFiltered.filter((product) => matchesSearchText(product, trimmedQuery))
     : priceFiltered;
-  const filteredProducts = [...searchFiltered].sort((a, b) => {
+  // A separate, page-local refinement (see the search icon next to the year
+  // filters below) — narrows whatever this page is already showing, rather
+  // than the navbar search box's site-wide behavior (which can switch
+  // category tabs or navigate). Applied on top of everything else, so it
+  // always narrows down, never widens, what's currently displayed.
+  const trimmedPageQuery = pageSearchQuery.trim().toLowerCase();
+  const pageSearchFiltered = trimmedPageQuery
+    ? searchFiltered.filter((product) => matchesSearchText(product, trimmedPageQuery))
+    : searchFiltered;
+  const filteredProducts = [...pageSearchFiltered].sort((a, b) => {
     if (sortOption === "price-asc") return parsePrice(a.price) - parsePrice(b.price);
     if (sortOption === "price-desc") return parsePrice(b.price) - parsePrice(a.price);
     if (sortOption === "rating-desc")
@@ -168,12 +194,16 @@ export function CatalogView({
   // Reset pagination when the active filters change. Adjusted during render
   // (React's documented pattern for this) rather than in an effect, so the
   // page doesn't flash the old (unfiltered-length) slice for a frame first.
-  const filterKey = `${activeCategory}|${activePriceFilter ?? ""}|${sortOption}|${trimmedQuery}`;
+  const filterKey = `${activeCategory}|${activePriceFilter ?? ""}|${sortOption}|${trimmedQuery}|${trimmedPageQuery}`;
   const [lastFilterKey, setLastFilterKey] = useState(filterKey);
   if (filterKey !== lastFilterKey) {
     setLastFilterKey(filterKey);
     setVisibleCount(PRODUCT_PAGE_SIZE);
   }
+
+  useEffect(() => {
+    if (isPageSearchOpen) pageSearchInputRef.current?.focus();
+  }, [isPageSearchOpen]);
 
   useEffect(() => {
     const loadMoreNode = loadMoreRef.current;
@@ -257,7 +287,43 @@ export function CatalogView({
             </p>
           </div>
 
-          <div className="no-scrollbar flex gap-2 overflow-x-auto pb-1 lg:max-w-[420px]">
+          <div className="no-scrollbar flex items-center gap-2 overflow-x-auto pb-1 lg:max-w-[420px]">
+            <div className="flex shrink-0 items-center gap-2">
+              <input
+                ref={pageSearchInputRef}
+                value={pageSearchQuery}
+                onChange={(event) => setPageSearchQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    setPageSearchQuery("");
+                    setIsPageSearchOpen(false);
+                  }
+                }}
+                placeholder="Search these parts…"
+                aria-label="Search parts on this page"
+                className={`h-9 min-w-0 rounded-full border bg-white text-[11px] font-medium text-zinc-900 shadow-sm outline-none transition-all duration-200 focus:border-zinc-500 ${
+                  isPageSearchOpen ? "w-32 border-zinc-200 px-3 opacity-100 sm:w-48" : "w-0 border-transparent px-0 opacity-0"
+                }`}
+              />
+              <button
+                type="button"
+                aria-label={isPageSearchOpen ? "Close search" : "Search parts on this page"}
+                onClick={() =>
+                  setIsPageSearchOpen((open) => {
+                    const next = !open;
+                    if (!next) setPageSearchQuery("");
+                    return next;
+                  })
+                }
+                className={`grid size-9 shrink-0 place-items-center rounded-full border shadow-sm transition ${
+                  isPageSearchOpen || trimmedPageQuery
+                    ? "border-zinc-950 bg-zinc-950 text-white"
+                    : "border-zinc-200 bg-white text-zinc-700 hover:border-zinc-300 hover:text-zinc-950"
+                }`}
+              >
+                {isPageSearchOpen ? <X className="size-3.5" /> : <Search className="size-3.5" />}
+              </button>
+            </div>
             {displayYears.map((year) => (
               <button
                 type="button"
@@ -533,16 +599,16 @@ export function CatalogView({
         </div>
       </div>
 
-      {activeCategory || trimmedQuery ? (
+      {activeCategory || trimmedQuery || trimmedPageQuery ? (
         <div className="mb-5 flex flex-wrap items-center justify-between gap-2">
           <p className="text-xs font-medium text-zinc-500">
             {filteredProducts.length > 0
               ? `${filteredProducts.length} ${activeCategory ? `${activeCategory} ` : ""}part${
                   filteredProducts.length === 1 ? "" : "s"
-                }${trimmedQuery ? ` for "${searchQuery.trim()}"` : ""} — ${compatibleWith}`
+                }${trimmedQuery ? ` for "${searchQuery.trim()}"` : ""}${trimmedPageQuery ? ` matching "${pageSearchQuery.trim()}"` : ""} — ${compatibleWith}`
               : `No parts found${activeCategory ? ` in ${activeCategory}` : ""}${
                   trimmedQuery ? ` for "${searchQuery.trim()}"` : ""
-                }`}
+                }${trimmedPageQuery ? ` matching "${pageSearchQuery.trim()}"` : ""}`}
           </p>
           {activeCategory ? (
             <button

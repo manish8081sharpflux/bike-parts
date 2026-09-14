@@ -307,9 +307,10 @@ export function OrdersListPage({
 }
 
 // Default pickup point: the warehouse city dispatchOrderAction uses
-// (process.env.WAREHOUSE_CITY, defaulting to "Patna" — see lib/porter.ts's
-// caller in lib/actions/admin-orders.ts). Not read from env here since this
-// is a client component and that var isn't (and shouldn't be) public.
+// (process.env.WAREHOUSE_CITY, defaulting to "Patna" — see
+// lib/actions/admin-orders.ts's warehouseAddress()). Not read from env here
+// since this is a client component and that var isn't (and shouldn't be)
+// public.
 
 export function DeliveryRouteMap({ rider, order }: { rider: ReturnType<typeof getRiderForOrder>; order: Order }) {
   const pickup = coordinatesForCity(WAREHOUSE_CITY);
@@ -500,8 +501,8 @@ export function OrderDetailView({
 
           {/*
             Return card — where the customer starts a return and tracks it
-            end to end (Requested -> admin Approved/Rejected -> Porter
-            pickup -> Received). Only makes sense once the order was
+            end to end (Requested -> admin Approved/Rejected -> reverse
+            shipment pickup -> Received). Only makes sense once the order was
             delivered (isDelivered) or a return is already in play — a
             cancelled order was never received, so there's nothing to
             return. The refund itself is handled entirely by the Refund
@@ -523,28 +524,40 @@ export function OrderDetailView({
               ) : order.returnStatus === "picked_up" ? (
                 <div className="mt-3 rounded-lg bg-blue-50 px-4 py-3 text-xs font-medium text-blue-700">
                   <p className="font-bold">Picked up — on its way back to our warehouse.</p>
-                  {order.returnPorterTrackingUrl ? (
+                  {order.returnShippingCourierName ? (
+                    <p className="mt-1">
+                      Courier: {order.returnShippingCourierName}
+                      {order.returnShippingAwbCode ? ` · AWB: ${order.returnShippingAwbCode}` : ""}
+                    </p>
+                  ) : null}
+                  {order.returnShippingTrackingUrl ? (
                     <a
-                      href={order.returnPorterTrackingUrl}
+                      href={order.returnShippingTrackingUrl}
                       target="_blank"
                       rel="noreferrer"
                       className="mt-1 inline-block font-bold underline"
                     >
-                      Track pickup ↗
+                      Track Shipment ↗
                     </a>
                   ) : null}
                 </div>
               ) : order.returnStatus === "pickup_scheduled" ? (
                 <div className="mt-3 rounded-lg bg-blue-50 px-4 py-3 text-xs font-medium text-blue-700">
                   <p className="font-bold">Pickup scheduled — our courier will collect the item soon.</p>
-                  {order.returnPorterTrackingUrl ? (
+                  {order.returnShippingCourierName ? (
+                    <p className="mt-1">
+                      Courier: {order.returnShippingCourierName}
+                      {order.returnShippingAwbCode ? ` · AWB: ${order.returnShippingAwbCode}` : ""}
+                    </p>
+                  ) : null}
+                  {order.returnShippingTrackingUrl ? (
                     <a
-                      href={order.returnPorterTrackingUrl}
+                      href={order.returnShippingTrackingUrl}
                       target="_blank"
                       rel="noreferrer"
                       className="mt-1 inline-block font-bold underline"
                     >
-                      Track pickup ↗
+                      Track Shipment ↗
                     </a>
                   ) : null}
                 </div>
@@ -662,9 +675,15 @@ export function OrderDetailView({
                   {partialReturn.status === "rejected" && partialReturn.adminNote ? (
                     <p className="mt-1 font-medium text-red-600">{partialReturn.adminNote}</p>
                   ) : null}
-                  {partialReturn.porterTrackingUrl && (partialReturn.status === "pickup_scheduled" || partialReturn.status === "picked_up") ? (
-                    <a href={partialReturn.porterTrackingUrl} target="_blank" rel="noreferrer" className="mt-1 inline-block font-bold text-blue-700 underline">
-                      Track pickup ↗
+                  {(partialReturn.status === "pickup_scheduled" || partialReturn.status === "picked_up") && partialReturn.shippingCourierName ? (
+                    <p className="mt-1 text-zinc-600">
+                      Courier: {partialReturn.shippingCourierName}
+                      {partialReturn.shippingAwbCode ? ` · AWB: ${partialReturn.shippingAwbCode}` : ""}
+                    </p>
+                  ) : null}
+                  {partialReturn.shippingTrackingUrl && (partialReturn.status === "pickup_scheduled" || partialReturn.status === "picked_up") ? (
+                    <a href={partialReturn.shippingTrackingUrl} target="_blank" rel="noreferrer" className="mt-1 inline-block font-bold text-blue-700 underline">
+                      Track Shipment ↗
                     </a>
                   ) : null}
                   {partialReturn.refundStatus !== "none" ? (
@@ -823,8 +842,42 @@ export function OrderDetailView({
             </div>
           ) : null}
 
-          {/* Rider card */}
-          {isOutForDelivery ? (
+          {/*
+            Shipment card — real, provider-backed tracking info (courier,
+            AWB, status, tracking link) once a shipment actually exists.
+            Never shown alongside the demo rider/map card below: this app
+            has no live rider GPS feed, so once a real shipment exists we
+            show what's actually true (courier + AWB + status) instead of a
+            fabricated "N km away" rider position.
+          */}
+          {isOutForDelivery && order.shippingProvider ? (
+            <div className="rounded-xl border border-zinc-100 bg-white p-5 shadow-sm">
+              <h3 className="text-sm font-black text-[#070e2b]">
+                {order.shippingCourierName ? `Shipped via ${order.shippingCourierName}` : "Your order has shipped"}
+              </h3>
+              {order.shippingAwbCode ? (
+                <p className="mt-1 text-xs text-zinc-500">
+                  AWB: <span className="font-mono font-bold text-zinc-700">{order.shippingAwbCode}</span>
+                </p>
+              ) : null}
+              <p className="mt-2 text-xs font-bold text-emerald-600">
+                Expected by {order.expectedDeliveryDate}
+              </p>
+              {order.shippingTrackingUrl ? (
+                <a
+                  href={order.shippingTrackingUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-3 flex h-9 w-full items-center justify-center gap-1.5 rounded-lg border border-zinc-200 text-xs font-bold text-zinc-700 transition hover:bg-zinc-50"
+                >
+                  Track Shipment ↗
+                </a>
+              ) : null}
+            </div>
+          ) : null}
+
+          {/* Demo rider card — shown only when there's no real, provider-backed shipment yet (see the Shipment card above), since this app has no live rider GPS feed to back it with. */}
+          {isOutForDelivery && !order.shippingProvider ? (
             <div className="rounded-xl border border-zinc-100 bg-white p-5 shadow-sm">
               <h3 className="text-sm font-black text-[#070e2b]">Your rider is on the way</h3>
               <div className="mt-3 flex items-center gap-3">
@@ -1005,7 +1058,8 @@ export function OrderDetailView({
 
         {isOutForDelivery ? (
           <div className="space-y-5">
-            <DeliveryRouteMap rider={rider} order={order} />
+            {/* Only the demo fallback (no real shipment yet) gets the approximate city-to-city map — a real Shiprocket/Porter shipment shows actual courier/AWB/tracking in the Shipment card instead (see above), never a fabricated rider position. */}
+            {!order.shippingProvider ? <DeliveryRouteMap rider={rider} order={order} /> : null}
 
             <div className="divide-y divide-zinc-100 rounded-xl border border-zinc-100 bg-white shadow-sm">
               {[

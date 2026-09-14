@@ -83,9 +83,9 @@ Razorpay account allows and refund it immediately after.
 - [ ] **Admin product management**: create a product, edit it (including an
       image), archive/delete it — confirm it disappears from the storefront
       and (if Meilisearch is configured) from search.
-- [ ] **Admin order management**: open an order, change its status, dispatch
-      via Porter if configured — confirm the customer-facing order status
-      updates to match.
+- [ ] **Admin order management**: open an order, change its status, create a
+      shipment via the shipping provider if configured — confirm the
+      customer-facing order status updates to match.
 
 ## Images
 

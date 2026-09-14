@@ -38,6 +38,19 @@ enum PaymentStatus {
   REFUNDED
 }
 
+// Which courier/logistics provider a shipment record belongs to. The active,
+// configurable provider the app can create NEW shipments through today is
+// Shiprocket (see lib/shipping/ — SHIPPING_PROVIDER env var); PORTER exists
+// only so historical rows from before the Shiprocket migration keep an
+// honest, queryable record of which provider actually handled them. Never
+// write PORTER for a new shipment, and never re-dispatch a PORTER row
+// through Shiprocket — see lib/shipping/service.ts and the migration note on
+// Order.shippingProvider below.
+enum ShippingProvider {
+  PORTER
+  SHIPROCKET
+}
+
 // Tracks a customer-initiated refund request end to end, independent of the
 // order's own fulfillment status — a delivered order can still have a
 // refund requested against it. NONE (the default) means no refund has ever
@@ -60,12 +73,16 @@ enum RefundStatus {
 // reverse-logistics side, independent of RefundStatus above (the money
 // side). A return only becomes requestable once an order is DELIVERED.
 // REQUESTED -> admin decides APPROVED or REJECTED. APPROVED -> admin
-// dispatches a reverse Porter pickup (PICKUP_SCHEDULED), which transitions
-// to PICKED_UP once Porter reports the item collected. RECEIVED is set once
-// the admin confirms the item is physically back at the warehouse — at that
-// point the existing refund flow (see order-refund-state.ts) is
-// auto-triggered, so approving/paying out the refund reuses the same
-// tested Razorpay code path a cancellation refund does.
+// creates a reverse shipment through the generic shipping service (see
+// lib/shipping/service.ts and lib/order-return-state.ts) — PICKUP_SCHEDULED
+// once a pickup is booked, PICKED_UP once the provider reports the item
+// collected. RECEIVED is set once the admin confirms the item is physically
+// back at the warehouse — at that point the existing refund flow (see
+// order-refund-state.ts) is auto-triggered, so approving/paying out the
+// refund reuses the same tested Razorpay code path a cancellation refund
+// does. This whole-order flow is legacy, kept only so pre-existing
+// in-flight returns can finish — see OrderReturn below for new,
+// item/quantity-level returns.
 enum ReturnStatus {
   NONE
   REQUESTED
@@ -203,6 +220,14 @@ model BikePartListing {
   finish             String?
   packIncludes       String?
   weightKg           Decimal?         @db.Decimal(6, 3)
+  // Package dimensions for shipping (Shiprocket order creation requires
+  // weight + dimensions per item — see lib/shipping/package.ts). Optional so
+  // legacy products keep working unadmined; a shipment can't be created for
+  // an order containing a product missing any of these (see
+  // buildOrderPackage), with a clear admin-facing error naming the product.
+  lengthCm           Decimal?         @db.Decimal(6, 2)
+  breadthCm          Decimal?         @db.Decimal(6, 2)
+  heightCm           Decimal?         @db.Decimal(6, 2)
   warrantyMonths     Int?
   countryOfOrigin    String?
   // Deprecated: historical manual value. Customer ratings come only from ProductReview.
@@ -225,82 +250,103 @@ model BikePartListing {
 }
 
 model Order {
-  id                                 String           @id @default(cuid())
-  buyerId                            String?
-  customerName                       String
-  customerPhone                      String
-  status                             OrderStatus      @default(PENDING)
-  itemsTotal                         Decimal          @db.Decimal(10, 2)
-  taxAmount                          Decimal          @default(0) @db.Decimal(10, 2)
-  deliveryCharge                     Decimal          @default(0) @db.Decimal(10, 2)
-  discount                           Decimal          @default(0) @db.Decimal(10, 2)
-  amount                             Decimal          @db.Decimal(10, 2)
-  paymentStatus                      PaymentStatus    @default(PENDING)
-  razorpayOrderId                    String?          @unique
-  razorpayPaymentId                  String?          @unique
-  razorpaySignature                  String?
-  porterOrderId                      String?
-  porterStatus                       String?
-  porterTrackingUrl                  String?
-  porterReconciliationRequired       Boolean          @default(false)
-  porterLastError                    String?
-  porterAttemptedAt                  DateTime?
-  deliveryAddress                    Json
-  bikeLabel                          String?
-  adminNote                          String?
+  id                                   String            @id @default(cuid())
+  buyerId                              String?
+  customerName                         String
+  customerPhone                        String
+  status                               OrderStatus       @default(PENDING)
+  itemsTotal                           Decimal           @db.Decimal(10, 2)
+  taxAmount                            Decimal           @default(0) @db.Decimal(10, 2)
+  deliveryCharge                       Decimal           @default(0) @db.Decimal(10, 2)
+  discount                             Decimal           @default(0) @db.Decimal(10, 2)
+  amount                               Decimal           @db.Decimal(10, 2)
+  paymentStatus                        PaymentStatus     @default(PENDING)
+  razorpayOrderId                      String?           @unique
+  razorpayPaymentId                    String?           @unique
+  razorpaySignature                    String?
+  // Forward-shipment state through the generic shipping service (see
+  // lib/shipping/) — provider-neutral by design, never a Shiprocket-specific
+  // name, even though Shiprocket is the only provider new shipments use
+  // today (see lib/shipping/types.ts). `shippingProvider` is null until a
+  // shipment actually exists; historical rows dispatched before the
+  // Shiprocket migration keep `shippingProvider = PORTER` forever — see the
+  // migration note in lib/shipping/service.ts. shippingOrderId/ShipmentId
+  // hold whatever identifiers the provider returns (Shiprocket has distinct
+  // order and shipment ids; the legacy Porter rows only ever populated what
+  // is now shippingOrderId, so shippingShipmentId stays null for them).
+  shippingProvider                     ShippingProvider?
+  shippingOrderId                      String?
+  shippingShipmentId                   String?
+  shippingAwbCode                      String?
+  shippingCourierName                  String?
+  shippingStatus                       String?
+  shippingTrackingUrl                  String?
+  shippingReconciliationRequired       Boolean           @default(false)
+  shippingLastError                    String?
+  shippingAttemptedAt                  DateTime?
+  deliveryAddress                      Json
+  bikeLabel                            String?
+  adminNote                            String?
   // Refund request lifecycle — see RefundStatus. `refundAmount` is set once a
   // request is made (defaults to the full order amount; always a full refund
   // in this app today, no partial-refund UI yet) and stays fixed through to
   // REFUNDED so the amount actually sent to Razorpay is always what's shown,
   // even if the order's own `amount` were ever edited afterward.
-  refundStatus                       RefundStatus     @default(NONE)
-  refundReason                       String?
-  refundAdminNote                    String?
-  refundAmount                       Decimal?         @db.Decimal(10, 2)
-  razorpayRefundId                   String?          @unique
-  refundAttemptedAt                  DateTime?
-  refundFailureReason                String?
-  refundReconciliationRequired       Boolean          @default(false)
-  refundRequestedAt                  DateTime?
-  refundProcessedAt                  DateTime?
-  // Product return lifecycle — see ReturnStatus. returnPorterOrderId/Status/
-  // TrackingUrl track the reverse pickup shipment, kept separate from the
-  // forward-delivery porter* fields above since a delivered order that's
-  // now being returned needs both trails visible independently.
-  returnStatus                       ReturnStatus     @default(NONE)
-  returnReason                       String?
-  returnAdminNote                    String?
-  returnRequestedAt                  DateTime?
-  returnPorterOrderId                String?
-  returnPorterStatus                 String?
-  returnPorterTrackingUrl            String?
-  // Mirrors porterReconciliationRequired/porterLastError/porterAttemptedAt
+  refundStatus                         RefundStatus      @default(NONE)
+  refundReason                         String?
+  refundAdminNote                      String?
+  refundAmount                         Decimal?          @db.Decimal(10, 2)
+  razorpayRefundId                     String?           @unique
+  refundAttemptedAt                    DateTime?
+  refundFailureReason                  String?
+  refundReconciliationRequired         Boolean           @default(false)
+  refundRequestedAt                    DateTime?
+  refundProcessedAt                    DateTime?
+  // Legacy whole-order return lifecycle — see ReturnStatus's doc comment.
+  // returnShipping* fields track the reverse shipment through the same
+  // generic shipping service as the forward shippingOrderId/etc. above and
+  // as OrderReturn's own shipping fields (see lib/shipping/service.ts) —
+  // kept as their own column set (not shared with the forward-shipment
+  // columns) since a delivered order that's now being returned needs both
+  // trails visible independently.
+  returnStatus                         ReturnStatus      @default(NONE)
+  returnReason                         String?
+  returnAdminNote                      String?
+  returnRequestedAt                    DateTime?
+  returnShippingProvider               ShippingProvider?
+  returnShippingOrderId                String?
+  returnShippingShipmentId             String?
+  returnShippingAwbCode                String?
+  returnShippingCourierName            String?
+  returnShippingStatus                 String?
+  returnShippingTrackingUrl            String?
+  // Mirrors shippingReconciliationRequired/shippingLastError/shippingAttemptedAt
   // above — same uncertain-outcome safety model, applied to the reverse
-  // pickup instead of the forward delivery (see dispatchReturnPickupAction).
-  returnPorterReconciliationRequired Boolean          @default(false)
-  returnPorterLastError              String?
-  returnPorterAttemptedAt            DateTime?
-  returnReceivedAt                   DateTime?
+  // shipment instead of the forward one (see dispatchReturnPickupAction).
+  returnShippingReconciliationRequired Boolean           @default(false)
+  returnShippingLastError              String?
+  returnShippingAttemptedAt            DateTime?
+  returnReceivedAt                     DateTime?
   // Set by the admin at "mark received" time — only RESELLABLE can ever
   // restore stock (see markReturnReceived / returnStockRestored below).
-  returnCondition                    ReturnCondition?
+  returnCondition                      ReturnCondition?
   // Idempotency guard: true once BikePartListing.stock has actually been
   // incremented for this return, so a repeated click (or a retried request)
   // can never double-restock the same returned unit.
-  returnStockRestored                Boolean          @default(false)
+  returnStockRestored                  Boolean           @default(false)
   // True while this order is currently holding a stock reservation (decremented
   // from ProductStock at checkout, not yet released back). Flipped back to
   // false once the reservation is released — payment failed/expired, or the
   // Razorpay order could never be created — so it's never released twice.
   // Left true forever once a sale completes (the stock was genuinely consumed).
-  stockReserved                      Boolean          @default(false)
-  createdAt                          DateTime         @default(now())
-  updatedAt                          DateTime         @updatedAt
-  buyer                              User?            @relation(fields: [buyerId], references: [id])
-  items                              OrderItem[]
-  events                             OrderEvent[]
-  productReviews                     ProductReview[]
-  orderReturns                       OrderReturn[]
+  stockReserved                        Boolean           @default(false)
+  createdAt                            DateTime          @default(now())
+  updatedAt                            DateTime          @updatedAt
+  buyer                                User?             @relation(fields: [buyerId], references: [id])
+  items                                OrderItem[]
+  events                               OrderEvent[]
+  productReviews                       ProductReview[]
+  orderReturns                         OrderReturn[]
 
   @@index([status])
   @@index([customerPhone])
@@ -381,46 +427,52 @@ enum OrderReturnRefundStatus {
 // Item- and quantity-level return request, introduced alongside (not
 // replacing) Order's pre-existing whole-order return* fields — see the
 // migration note there. One order can have many OrderReturns, each with its
-// own independent lifecycle and its own Porter pickup and refund (Razorpay
-// supports multiple partial refunds against one payment, so each return
-// gets its own razorpayRefundId rather than sharing Order's single one).
+// own independent lifecycle and its own reverse shipment and refund
+// (Razorpay supports multiple partial refunds against one payment, so each
+// return gets its own razorpayRefundId rather than sharing Order's single
+// one).
 model OrderReturn {
-  id                           String                  @id @default(cuid())
-  orderId                      String
-  status                       OrderReturnStatus       @default(REQUESTED)
-  reason                       String
-  adminNote                    String?
-  requestedAt                  DateTime                @default(now())
-  approvedAt                   DateTime?
-  receivedAt                   DateTime?
+  id                             String                  @id @default(cuid())
+  orderId                        String
+  status                         OrderReturnStatus       @default(REQUESTED)
+  reason                         String
+  adminNote                      String?
+  requestedAt                    DateTime                @default(now())
+  approvedAt                     DateTime?
+  receivedAt                     DateTime?
   // Set once, at "mark received" time — see ReturnCondition (shared with the
   // legacy whole-order return flow). Only RESELLABLE ever restores stock.
-  condition                    ReturnCondition?
-  // Reverse-pickup Porter state, scoped to THIS return — the Porter request
-  // reference used is `return-{this.id}`, never `return-{orderId}`, so two
-  // returns on the same order can never collide on one Porter shipment. Same
-  // DISPATCHING-placeholder + reconciliation-required safety model as the
-  // legacy flow's returnPorter* fields on Order (see order-returns/service.ts).
-  porterOrderId                String?
-  porterStatus                 String?
-  porterTrackingUrl            String?
-  porterReconciliationRequired Boolean                 @default(false)
-  porterLastError              String?
-  porterAttemptedAt            DateTime?
+  condition                      ReturnCondition?
+  // Reverse-shipment state through the generic shipping service, scoped to
+  // THIS return — the shipping reference used is `return-{this.id}`, never
+  // `return-{orderId}`, so two returns on the same order can never collide
+  // on one shipment. Same CREATING-placeholder + reconciliation-required
+  // safety model as the legacy flow's returnShipping* fields on Order (see
+  // lib/order-returns/service.ts and lib/shipping/service.ts).
+  shippingProvider               ShippingProvider?
+  shippingOrderId                String?
+  shippingShipmentId             String?
+  shippingAwbCode                String?
+  shippingCourierName            String?
+  shippingStatus                 String?
+  shippingTrackingUrl            String?
+  shippingReconciliationRequired Boolean                 @default(false)
+  shippingLastError              String?
+  shippingAttemptedAt            DateTime?
   // Money side — see OrderReturnRefundStatus. refundAmount is computed from
   // OrderReturnItem quantities × the historical OrderItem.unitPrice at
   // receive time (never current BikePartListing.price), and is capped so
   // the sum of refundAmount across every REFUNDED OrderReturn on one order
   // can never exceed that order's paid amount.
-  refundStatus                 OrderReturnRefundStatus @default(NONE)
-  refundAmount                 Decimal?                @db.Decimal(10, 2)
-  razorpayRefundId             String?                 @unique
-  refundFailureReason          String?
-  refundReconciliationRequired Boolean                 @default(false)
-  refundAttemptedAt            DateTime?
-  refundProcessedAt            DateTime?
-  createdAt                    DateTime                @default(now())
-  updatedAt                    DateTime                @updatedAt
+  refundStatus                   OrderReturnRefundStatus @default(NONE)
+  refundAmount                   Decimal?                @db.Decimal(10, 2)
+  razorpayRefundId               String?                 @unique
+  refundFailureReason            String?
+  refundReconciliationRequired   Boolean                 @default(false)
+  refundAttemptedAt              DateTime?
+  refundProcessedAt              DateTime?
+  createdAt                      DateTime                @default(now())
+  updatedAt                      DateTime                @updatedAt
 
   order Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
   items OrderReturnItem[]

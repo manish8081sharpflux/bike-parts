@@ -5,11 +5,16 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { requireAdminAction } from "@/lib/auth/require-admin";
 import {
-  createPorterDelivery,
-  getPorterDeliveryStatus,
-  assertPorterConfigured,
-  PorterRequestError,
-} from "@/lib/porter";
+  assertShippingConfigured,
+  assignAwb,
+  cancelShipment,
+  createReverseShipment,
+  createShipment,
+  schedulePickup,
+  trackShipment,
+  ShippingProviderError,
+} from "@/lib/shipping/service";
+import { buildPackage } from "@/lib/shipping/package";
 import { createRazorpayRefund, isRazorpayConfigured } from "@/lib/razorpay";
 import {
   claimRefundRequest,
@@ -18,28 +23,28 @@ import {
   markRefundSucceeded,
 } from "@/lib/order-refund-state";
 import {
-  applyPorterStatus,
+  applyShippingStatus,
   cancelAdminOrderBeforeDispatch,
-  claimPorterDispatch,
+  claimShippingDispatch,
   ORDER_STATUS_LABELS,
 } from "@/lib/order-delivery-state";
 import {
   approveReturn,
-  applyReturnPorterStatus,
-  claimReturnPickupDispatch,
-  completeReturnPickupDispatch,
-  failReturnPickupDispatch,
+  applyReturnShippingStatus,
+  claimReturnShippingDispatch,
+  completeReturnShippingDispatch,
+  failReturnShippingDispatch,
   markReturnReceived,
   rejectReturn,
   type ReturnCondition,
 } from "@/lib/order-return-state";
 import {
   approvePartialReturn,
-  applyPartialReturnPorterStatus,
+  applyPartialReturnShippingStatus,
   claimPartialRefundRequest,
-  claimPartialReturnPickupDispatch,
-  completePartialReturnPickupDispatch,
-  failPartialReturnPickupDispatch,
+  claimPartialReturnShippingDispatch,
+  completePartialReturnShippingDispatch,
+  failPartialReturnShippingDispatch,
   markPartialRefundFailed,
   markPartialRefundNeedsReconciliation,
   markPartialRefundSucceeded,
@@ -47,6 +52,7 @@ import {
   rejectPartialReturn,
 } from "@/lib/order-returns/service";
 import type { OrderStatus } from "@prisma/client";
+import { getPorterDeliveryStatus, cancelPorterDelivery } from "@/lib/porter";
 
 const ORDER_STATUSES: OrderStatus[] = [
   "PENDING",
@@ -73,6 +79,52 @@ type DeliveryAddress = {
   pincode?: string;
 };
 
+function warehouseAddress() {
+  return {
+    contactName: process.env.WAREHOUSE_CONTACT_NAME!,
+    contactPhone: process.env.WAREHOUSE_PHONE!,
+    line1: process.env.WAREHOUSE_ADDRESS_LINE1!,
+    city: process.env.WAREHOUSE_CITY!,
+    pincode: process.env.WAREHOUSE_PINCODE!,
+  };
+}
+
+function assertWarehouseConfiguredInProduction() {
+  if (
+    process.env.NODE_ENV === "production" &&
+    (!process.env.WAREHOUSE_CONTACT_NAME ||
+      !process.env.WAREHOUSE_PHONE ||
+      !process.env.WAREHOUSE_ADDRESS_LINE1 ||
+      !process.env.WAREHOUSE_CITY ||
+      !/^\d{6}$/.test(process.env.WAREHOUSE_PINCODE ?? ""))
+  ) {
+    throw new Error("Production warehouse configuration is incomplete.");
+  }
+}
+
+function customerAddressFrom(order: { deliveryAddress: unknown; customerName: string; customerPhone: string }) {
+  const address = (order.deliveryAddress ?? {}) as DeliveryAddress;
+  const line1 = [address.flatNo, address.floor, address.area].filter(Boolean).join(", ");
+  const phone = address.phone || order.customerPhone;
+  if (!order.customerName.trim() || !/^\d{10}$/.test(phone) || !line1 || !address.city || !/^\d{6}$/.test(address.pincode ?? "")) {
+    throw new Error("Delivery address is incomplete. Contact name, phone, address, city, and pincode are required.");
+  }
+  return {
+    contactName: address.contactName || order.customerName,
+    contactPhone: phone,
+    line1,
+    line2: address.landmark ?? "",
+    city: address.city ?? "",
+    pincode: address.pincode ?? "",
+  };
+}
+
+/** True for a caught error that means the mutation's outcome is genuinely unknown — never safe to silently retry. */
+function isUncertain(error: unknown): boolean {
+  if (error instanceof ShippingProviderError) return error.uncertain;
+  return false;
+}
+
 export async function updateOrderStatusAction(orderId: string, formData: FormData) {
   await requireAdminAction();
 
@@ -86,7 +138,7 @@ export async function updateOrderStatusAction(orderId: string, formData: FormDat
   if (statusRaw === "CANCELLED") {
     const result = await cancelAdminOrderBeforeDispatch(orderId, adminNote);
     if (!result.cancelled) {
-      redirect(`/admin/orders/${orderId}?error=${encodeURIComponent("Dispatched or already-cancelled orders require Porter cancellation/reconciliation before local cancellation.")}`);
+      redirect(`/admin/orders/${orderId}?error=${encodeURIComponent("Shipped or already-cancelled orders require shipment cancellation/reconciliation before local cancellation.")}`);
     }
     revalidatePath(`/admin/orders/${orderId}`);
     revalidatePath("/admin/orders");
@@ -125,106 +177,136 @@ export async function updateOrderStatusAction(orderId: string, formData: FormDat
   // pointing them straight at the refund they now need to approve or reject.
 }
 
-export async function dispatchOrderAction(orderId: string) {
+/**
+ * Creates a forward shipment for a paid order through the generic shipping
+ * service (Shiprocket today — see lib/shipping/service.ts). Collapses
+ * create-order -> assign-AWB -> schedule-pickup into one admin click; once
+ * the order is actually created at the provider, any failure in the later
+ * steps is treated as uncertain regardless of its own classification, since
+ * a real shipment now exists there that a naive retry could duplicate.
+ *
+ * `courierCompanyId` (optional) comes from the admin's courier choice (see
+ * the serviceability check surfaced in the dispatch UI) — omitted, the
+ * provider's own recommended courier is used (see assignAwb).
+ * `confirmDefaultDimensions` must be "on" when the order has more than one
+ * distinct product, since the package builder falls back to a configured
+ * default parcel size in that case rather than fabricating a per-order
+ * volumetric calculation (see lib/shipping/package.ts) — the admin must
+ * explicitly acknowledge that before a shipment is created.
+ */
+export async function dispatchOrderAction(orderId: string, formData: FormData) {
   await requireAdminAction();
   let claimed = false;
+  let shipmentCreated = false;
+  const courierCompanyId = String(formData.get("courierCompanyId") ?? "").trim() || undefined;
+  const confirmDefaultDimensions = formData.get("confirmDefaultDimensions") === "on";
 
   try {
-    const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
+    const order = await prisma.order.findUniqueOrThrow({
+      where: { id: orderId },
+      include: { items: { include: { listing: true } } },
+    });
 
     if (order.paymentStatus !== "PAID") {
-      throw new Error("Order must be paid before it can be dispatched for delivery.");
+      throw new Error("Order must be paid before a shipment can be created.");
     }
     if (!(order.status === "PAID" || order.status === "PACKED")) {
       throw new Error("This order is not in a dispatchable fulfillment state.");
     }
-    if (order.porterOrderId) {
-      throw new Error("This order has already been dispatched with Porter.");
+    if (order.shippingOrderId) {
+      throw new Error("This order already has a shipment.");
     }
-    assertPorterConfigured();
-    if (
-      process.env.NODE_ENV === "production" &&
-      (!process.env.WAREHOUSE_CONTACT_NAME ||
-        !process.env.WAREHOUSE_PHONE ||
-        !process.env.WAREHOUSE_ADDRESS_LINE1 ||
-        !process.env.WAREHOUSE_CITY ||
-        !/^\d{6}$/.test(process.env.WAREHOUSE_PINCODE ?? ""))
-    ) {
-      throw new Error("Production warehouse configuration is incomplete.");
+    assertShippingConfigured();
+    assertWarehouseConfiguredInProduction();
+
+    const drop = customerAddressFrom(order);
+
+    const built = buildPackage(
+      order.items.map((item) => ({
+        productName: item.productName,
+        quantity: item.quantity,
+        weightKg: item.listing?.weightKg != null ? Number(item.listing.weightKg) : null,
+        lengthCm: item.listing?.lengthCm != null ? Number(item.listing.lengthCm) : null,
+        breadthCm: item.listing?.breadthCm != null ? Number(item.listing.breadthCm) : null,
+        heightCm: item.listing?.heightCm != null ? Number(item.listing.heightCm) : null,
+      }))
+    );
+    if (!built.usesRealDimensions && !confirmDefaultDimensions) {
+      throw new Error("This order has multiple different products — confirm the default parcel dimensions before creating a shipment.");
     }
 
-    const address = (order.deliveryAddress ?? {}) as DeliveryAddress;
-    const line1 = [address.flatNo, address.floor, address.area].filter(Boolean).join(", ");
-    // The delivery contact may not be the account holder (e.g. an order sent
-    // to a shop or a relative's place), so Porter gets the address's own
-    // phone when the snapshot has one — falling back to the account phone
-    // only for orders placed before Fix 6, whose snapshot predates this
-    // field. Whichever number is chosen is the one validated here.
-    const dropPhone = address.phone || order.customerPhone;
-    if (!order.customerName.trim() || !/^\d{10}$/.test(dropPhone) || !line1 || !address.city || !/^\d{6}$/.test(address.pincode ?? "")) {
-      throw new Error("Delivery address is incomplete. Contact name, phone, address, city, and pincode are required.");
-    }
-
-    if (!(await claimPorterDispatch(orderId))) {
-      throw new Error("This order has already been dispatched with Porter.");
+    if (!(await claimShippingDispatch(orderId))) {
+      throw new Error("This order already has a shipment.");
     }
     claimed = true;
 
-    const result = await createPorterDelivery({
-      orderId: order.id,
-      pickup: {
-        contactName: process.env.WAREHOUSE_CONTACT_NAME!,
-        contactPhone: process.env.WAREHOUSE_PHONE!,
-        line1: process.env.WAREHOUSE_ADDRESS_LINE1!,
-        city: process.env.WAREHOUSE_CITY!,
-        pincode: process.env.WAREHOUSE_PINCODE!,
-      },
-      drop: {
-        contactName: address.contactName || order.customerName,
-        contactPhone: dropPhone,
-        line1,
-        line2: address.landmark ?? "",
-        city: address.city ?? "",
-        pincode: address.pincode ?? "",
-      },
-      amount: Number(order.amount),
+    const created = await createShipment({
+      referenceId: order.id,
+      pickup: warehouseAddress(),
+      drop,
+      package: built.package,
+      items: order.items.map((item) => ({
+        name: item.productName,
+        sku: item.listing?.sku ?? null,
+        quantity: item.quantity,
+        unitPrice: Number(item.unitPrice),
+      })),
+      declaredValue: Number(order.amount),
+      codAmount: 0,
+      courierCompanyId,
     });
+    shipmentCreated = true;
 
-    if (!result.porterOrderId) {
-      throw new PorterRequestError("Porter returned no delivery identifier; reconciliation is required.", { uncertain: true });
+    if (!created.shippingShipmentId) {
+      throw new ShippingProviderError("Shiprocket returned no shipment identifier; reconciliation is required.", { uncertain: true });
     }
+
+    const awb = await assignAwb(created.shippingShipmentId, courierCompanyId);
+    const pickup = await schedulePickup(created.shippingShipmentId);
 
     await prisma.$transaction(async (tx) => {
       const completed = await tx.order.updateMany({
-        where: { id: orderId, porterOrderId: "DISPATCHING" },
+        where: { id: orderId, shippingOrderId: "CREATING" },
         data: {
-          porterOrderId: result.porterOrderId,
-          porterStatus: result.status,
-          porterTrackingUrl: result.trackingUrl,
+          shippingProvider: "SHIPROCKET",
+          shippingOrderId: created.shippingOrderId,
+          shippingShipmentId: created.shippingShipmentId,
+          shippingAwbCode: awb.awbCode,
+          shippingCourierName: awb.courierName,
+          shippingStatus: pickup.status,
           status: "SHIPPED",
-          porterReconciliationRequired: false,
-          porterLastError: null,
+          shippingReconciliationRequired: false,
+          shippingLastError: null,
         },
       });
       if (completed.count !== 1) throw new Error("Dispatch claim is no longer current.");
-      await tx.orderEvent.create({ data: { orderId, type: "PORTER_DISPATCHED", message: `Dispatched via Porter (order ${result.porterOrderId})` } });
+      await tx.orderEvent.create({
+        data: {
+          orderId,
+          type: "SHIPMENT_CREATED",
+          message: `Shipment created via Shiprocket (order ${created.shippingOrderId}, AWB ${awb.awbCode}, courier ${awb.courierName})`,
+        },
+      });
     });
   } catch (error) {
-    console.error("[porter] Dispatch failed for order", orderId, error);
+    console.error("[shipping] Dispatch failed for order", orderId, error);
     if (claimed) {
-      const failureMessage = error instanceof Error ? error.message : "Could not dispatch this order.";
-      const uncertain = error instanceof PorterRequestError && error.uncertain;
+      const failureMessage = error instanceof Error ? error.message : "Could not create a shipment for this order.";
+      // Once the provider has actually created the order/shipment, any
+      // later failure must be treated as uncertain regardless of its own
+      // classification — a naive retry could create a second shipment.
+      const uncertain = shipmentCreated || isUncertain(error);
       await prisma.$transaction(async (tx) => {
         if (uncertain) {
-          await tx.order.updateMany({ where: { id: orderId, porterOrderId: "DISPATCHING" }, data: { porterStatus: "RECONCILIATION_REQUIRED", porterReconciliationRequired: true, porterLastError: failureMessage } });
-          await tx.orderEvent.create({ data: { orderId, type: "PORTER_RECONCILIATION_REQUIRED", message: failureMessage } });
+          await tx.order.updateMany({ where: { id: orderId, shippingOrderId: "CREATING" }, data: { shippingStatus: "RECONCILIATION_REQUIRED", shippingReconciliationRequired: true, shippingLastError: failureMessage } });
+          await tx.orderEvent.create({ data: { orderId, type: "SHIPMENT_RECONCILIATION_REQUIRED", message: failureMessage } });
         } else {
-          await tx.order.updateMany({ where: { id: orderId, porterOrderId: "DISPATCHING" }, data: { porterOrderId: null, porterStatus: null, porterLastError: failureMessage } });
-          await tx.orderEvent.create({ data: { orderId, type: "PORTER_DISPATCH_FAILED", message: failureMessage } });
+          await tx.order.updateMany({ where: { id: orderId, shippingOrderId: "CREATING" }, data: { shippingOrderId: null, shippingStatus: null, shippingLastError: failureMessage } });
+          await tx.orderEvent.create({ data: { orderId, type: "SHIPMENT_CREATE_FAILED", message: failureMessage } });
         }
       });
     }
-    const message = error instanceof Error ? error.message : "Could not dispatch this order.";
+    const message = error instanceof Error ? error.message : "Could not create a shipment for this order.";
     redirect(`/admin/orders/${orderId}?error=${encodeURIComponent(message)}`);
   }
 
@@ -234,27 +316,115 @@ export async function dispatchOrderAction(orderId: string) {
   revalidatePath("/admin");
 }
 
+/**
+ * Refreshes forward-tracking status. Branches on shippingProvider: a
+ * historical PORTER row (from before the Shiprocket migration — see the
+ * migration note on Order.shippingProvider) is tracked through the frozen
+ * legacy lib/porter.ts wrapper, since Porter's status vocabulary and
+ * mapPorterStatusToOrderStatus-equivalent logic don't apply to Shiprocket
+ * and vice versa. New shipments are always SHIPROCKET.
+ */
 export async function refreshDeliveryStatusAction(orderId: string) {
   await requireAdminAction();
 
   try {
     const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
-    if (!order.porterOrderId || order.porterOrderId === "DISPATCHING" || order.porterReconciliationRequired) {
-      throw new Error("This order has not been dispatched yet.");
+    if (!order.shippingOrderId || order.shippingOrderId === "CREATING" || order.shippingReconciliationRequired) {
+      throw new Error("This order does not have an active shipment yet.");
     }
 
-    const { status } = await getPorterDeliveryStatus(order.porterOrderId);
-
-    await applyPorterStatus(orderId, status);
+    if (order.shippingProvider === "PORTER") {
+      const { status } = await getPorterDeliveryStatus(order.shippingOrderId);
+      await applyLegacyPorterForwardStatus(orderId, status);
+    } else {
+      const tracking = await trackShipment({ awbCode: order.shippingAwbCode, shippingShipmentId: order.shippingShipmentId });
+      await applyShippingStatus(orderId, tracking.rawStatus);
+      if (tracking.trackingUrl) {
+        await prisma.order.update({ where: { id: orderId }, data: { shippingTrackingUrl: tracking.trackingUrl } });
+      }
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not refresh delivery status.";
-    console.error("[porter] Delivery status refresh failed for order", orderId, error);
+    console.error("[shipping] Delivery status refresh failed for order", orderId, error);
     redirect(`/admin/orders/${orderId}?error=${encodeURIComponent(message)}`);
   }
 
   revalidatePath(`/admin/orders/${orderId}`);
   revalidatePath("/admin/orders");
   revalidatePath("/admin/returns");
+  revalidatePath("/admin");
+}
+
+/** Legacy-only: applies a raw Porter status string using Porter's own (frozen) status vocabulary — kept solely so historical PORTER-provider orders remain trackable. Never used for new (SHIPROCKET) shipments. */
+async function applyLegacyPorterForwardStatus(orderId: string, rawStatus: string) {
+  const value = rawStatus.toLowerCase().trim();
+  let mapped: OrderStatus | null = null;
+  if (value.includes("cancel")) mapped = "CANCELLED";
+  else if (value.includes("out_for_delivery") || value.includes("out for delivery") || value.includes("transit") || value.includes("ongoing") || value.includes("picked") || value.includes("arrived")) mapped = "OUT_FOR_DELIVERY";
+  else if (value === "delivered" || value.includes("completed") || value.includes("complete")) mapped = "DELIVERED";
+
+  return prisma.$transaction(async (tx) => {
+    await tx.order.update({ where: { id: orderId }, data: { shippingStatus: rawStatus } });
+    if (!mapped) return;
+    const allowedPrevious: Record<string, OrderStatus[]> = {
+      OUT_FOR_DELIVERY: ["PAID", "PACKED", "SHIPPED"],
+      DELIVERED: ["PAID", "PACKED", "SHIPPED", "OUT_FOR_DELIVERY"],
+      CANCELLED: ["PAID", "PACKED", "SHIPPED", "OUT_FOR_DELIVERY"],
+    };
+    const transitioned = await tx.order.updateMany({ where: { id: orderId, status: { in: allowedPrevious[mapped] ?? [] } }, data: { status: mapped } });
+    if (transitioned.count === 1) {
+      await tx.orderEvent.create({ data: { orderId, type: "STATUS_CHANGE", message: `Status changed to ${ORDER_STATUS_LABELS[mapped] ?? mapped} (Porter status "${rawStatus}")` } });
+    }
+  });
+}
+
+/**
+ * Cancels an already-created shipment — a capability the old Porter
+ * integration never actually exposed (cancelPorterDelivery existed but was
+ * never wired to an action). Only meaningful before the shipment has been
+ * picked up; the provider itself also rejects cancellation past that point
+ * with a definite (non-uncertain) error. Never marks the shipment cancelled
+ * on an uncertain outcome.
+ */
+export async function cancelShipmentAction(orderId: string) {
+  await requireAdminAction();
+
+  try {
+    const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
+    if (!order.shippingOrderId || order.shippingOrderId === "CREATING") {
+      throw new Error("This order does not have an active shipment to cancel.");
+    }
+    if (order.shippingReconciliationRequired) {
+      throw new Error("Shipment outcome is uncertain. Verify with the provider before cancelling.");
+    }
+    if (order.status === "DELIVERED" || order.status === "CANCELLED") {
+      throw new Error("This order cannot be cancelled in its current state.");
+    }
+
+    if (order.shippingProvider === "PORTER") {
+      await cancelPorterDelivery(order.shippingOrderId);
+    } else {
+      await cancelShipment(order.shippingOrderId);
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.order.update({ where: { id: orderId }, data: { status: "CANCELLED", shippingStatus: "CANCELLED" } });
+      await tx.orderEvent.create({ data: { orderId, type: "SHIPMENT_CANCELLED", message: "Shipment cancelled." } });
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not cancel this shipment.";
+    console.error("[shipping] Shipment cancellation failed for order", orderId, error);
+    // An uncertain cancellation outcome must never be recorded as
+    // cancelled — leave the order's status untouched and require manual
+    // verification instead.
+    if (isUncertain(error)) {
+      await prisma.order.update({ where: { id: orderId }, data: { shippingReconciliationRequired: true, shippingLastError: message } }).catch(() => {});
+    }
+    redirect(`/admin/orders/${orderId}?error=${encodeURIComponent(message)}`);
+  }
+
+  revalidatePath(`/admin/orders/${orderId}`);
+  revalidatePath("/admin/orders");
   revalidatePath("/admin");
 }
 
@@ -336,7 +506,7 @@ export async function rejectRefundAction(orderId: string, formData: FormData) {
   revalidatePath("/admin");
 }
 
-/** Approves a pending return request — next step for the admin is dispatching a reverse pickup. */
+/** Approves a pending return request — next step for the admin is creating a reverse shipment. */
 export async function approveReturnAction(orderId: string, formData: FormData) {
   await requireAdminAction();
   const adminNote = String(formData.get("returnAdminNote") ?? "").trim();
@@ -366,94 +536,103 @@ export async function rejectReturnAction(orderId: string, formData: FormData) {
 }
 
 /**
- * Dispatches a reverse Porter pickup for an approved return — the customer's
- * delivery address becomes the pickup point and the warehouse becomes the
- * drop, reusing the exact same createPorterDelivery call the forward
- * dispatch uses (see dispatchOrderAction above), just with the two
- * addresses swapped.
+ * Creates a reverse shipment for an approved LEGACY whole-order return —
+ * the customer's delivery address becomes the pickup point and the
+ * warehouse becomes the drop, through the same generic shipping service
+ * createReverseShipment uses for partial returns (see
+ * dispatchPartialReturnPickupAction below) — one shipping implementation,
+ * not two. Ships every item on the order, since the legacy flow has no
+ * concept of a partial return.
  */
-export async function dispatchReturnPickupAction(orderId: string) {
+export async function dispatchReturnPickupAction(orderId: string, formData: FormData) {
   await requireAdminAction();
   let claimed = false;
+  let shipmentCreated = false;
+  const courierCompanyId = String(formData.get("courierCompanyId") ?? "").trim() || undefined;
+  const confirmDefaultDimensions = formData.get("confirmDefaultDimensions") === "on";
 
   try {
-    const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
+    const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId }, include: { items: { include: { listing: true } } } });
 
     if (order.returnStatus !== "APPROVED") {
       throw new Error("This return has not been approved yet.");
     }
-    if (order.returnPorterReconciliationRequired) {
-      throw new Error("Pickup outcome is uncertain. Verify the pickup with Porter before dispatching again.");
+    if (order.returnShippingReconciliationRequired) {
+      throw new Error("Shipment outcome is uncertain. Verify with the provider before creating another.");
     }
-    if (order.returnPorterOrderId) {
-      throw new Error("A pickup has already been dispatched for this return.");
+    if (order.returnShippingOrderId) {
+      throw new Error("A shipment has already been created for this return.");
     }
-    assertPorterConfigured();
-    if (
-      process.env.NODE_ENV === "production" &&
-      (!process.env.WAREHOUSE_CONTACT_NAME ||
-        !process.env.WAREHOUSE_PHONE ||
-        !process.env.WAREHOUSE_ADDRESS_LINE1 ||
-        !process.env.WAREHOUSE_CITY ||
-        !/^\d{6}$/.test(process.env.WAREHOUSE_PINCODE ?? ""))
-    ) {
-      throw new Error("Production warehouse configuration is incomplete.");
+    assertShippingConfigured();
+    assertWarehouseConfiguredInProduction();
+
+    const pickup = customerAddressFrom(order);
+
+    const built = buildPackage(
+      order.items.map((item) => ({
+        productName: item.productName,
+        quantity: item.quantity,
+        weightKg: item.listing?.weightKg != null ? Number(item.listing.weightKg) : null,
+        lengthCm: item.listing?.lengthCm != null ? Number(item.listing.lengthCm) : null,
+        breadthCm: item.listing?.breadthCm != null ? Number(item.listing.breadthCm) : null,
+        heightCm: item.listing?.heightCm != null ? Number(item.listing.heightCm) : null,
+      }))
+    );
+    if (!built.usesRealDimensions && !confirmDefaultDimensions) {
+      throw new Error("This order has multiple different products — confirm the default parcel dimensions before creating a shipment.");
     }
 
-    const address = (order.deliveryAddress ?? {}) as DeliveryAddress;
-    const line1 = [address.flatNo, address.floor, address.area].filter(Boolean).join(", ");
-    const pickupPhone = address.phone || order.customerPhone;
-    if (!order.customerName.trim() || !/^\d{10}$/.test(pickupPhone) || !line1 || !address.city || !/^\d{6}$/.test(address.pincode ?? "")) {
-      throw new Error("Delivery address is incomplete. Contact name, phone, address, city, and pincode are required.");
-    }
-
-    if (!(await claimReturnPickupDispatch(orderId))) {
-      throw new Error("A pickup has already been dispatched for this return.");
+    if (!(await claimReturnShippingDispatch(orderId))) {
+      throw new Error("A shipment has already been created for this return.");
     }
     claimed = true;
 
-    const result = await createPorterDelivery({
-      orderId: `return-${order.id}`,
-      pickup: {
-        contactName: address.contactName || order.customerName,
-        contactPhone: pickupPhone,
-        line1,
-        line2: address.landmark ?? "",
-        city: address.city ?? "",
-        pincode: address.pincode ?? "",
-      },
-      drop: {
-        contactName: process.env.WAREHOUSE_CONTACT_NAME!,
-        contactPhone: process.env.WAREHOUSE_PHONE!,
-        line1: process.env.WAREHOUSE_ADDRESS_LINE1!,
-        city: process.env.WAREHOUSE_CITY!,
-        pincode: process.env.WAREHOUSE_PINCODE!,
-      },
-      amount: Number(order.amount),
+    const created = await createReverseShipment({
+      referenceId: `return-${order.id}`,
+      pickup,
+      drop: warehouseAddress(),
+      package: built.package,
+      items: order.items.map((item) => ({
+        name: item.productName,
+        sku: item.listing?.sku ?? null,
+        quantity: item.quantity,
+        unitPrice: Number(item.unitPrice),
+      })),
+      declaredValue: Number(order.amount),
       instructions: `Return pickup for Deep Automobiles order ${order.id}`,
     });
+    shipmentCreated = true;
 
-    if (!result.porterOrderId) {
-      throw new PorterRequestError("Porter returned no delivery identifier; reconciliation is required.", { uncertain: true });
+    if (!created.shippingShipmentId) {
+      throw new ShippingProviderError("Shiprocket returned no shipment identifier; reconciliation is required.", { uncertain: true });
     }
 
-    if (!(await completeReturnPickupDispatch(orderId, result))) {
-      throw new Error("Return pickup claim is no longer current.");
+    const awb = await assignAwb(created.shippingShipmentId, courierCompanyId);
+    const pickupResult = await schedulePickup(created.shippingShipmentId);
+
+    if (
+      !(await completeReturnShippingDispatch(orderId, {
+        provider: "SHIPROCKET",
+        shippingOrderId: created.shippingOrderId,
+        shippingShipmentId: created.shippingShipmentId,
+        awbCode: awb.awbCode,
+        courierName: awb.courierName,
+        status: pickupResult.status,
+        trackingUrl: null,
+      }))
+    ) {
+      throw new Error("Return shipment claim is no longer current.");
     }
   } catch (error) {
-    console.error("[porter] Return pickup dispatch failed for order", orderId, error);
+    console.error("[shipping] Return shipment creation failed for order", orderId, error);
     if (claimed) {
-      const failureMessage = error instanceof Error ? error.message : "Could not dispatch this return pickup.";
-      // Same definite-vs-uncertain split as dispatchOrderAction: a timeout,
-      // ECONNRESET, socket interruption, or a response missing a Porter
-      // order id means the pickup may already exist on Porter's side — that
-      // must never be treated as "safe to retry."
-      const uncertain = error instanceof PorterRequestError && error.uncertain;
-      await failReturnPickupDispatch(orderId, failureMessage, uncertain).catch((dbError) => {
-        console.error("[porter] Also failed to record return-dispatch-failed state for order", orderId, dbError);
+      const failureMessage = error instanceof Error ? error.message : "Could not create this return shipment.";
+      const uncertain = shipmentCreated || isUncertain(error);
+      await failReturnShippingDispatch(orderId, failureMessage, uncertain).catch((dbError) => {
+        console.error("[shipping] Also failed to record return-dispatch-failed state for order", orderId, dbError);
       });
     }
-    const message = error instanceof Error ? error.message : "Could not dispatch this return pickup.";
+    const message = error instanceof Error ? error.message : "Could not create this return shipment.";
     redirect(`/admin/orders/${orderId}?error=${encodeURIComponent(message)}`);
   }
 
@@ -462,24 +641,27 @@ export async function dispatchReturnPickupAction(orderId: string) {
   revalidatePath("/admin/returns");
 }
 
-/** Polls Porter for the reverse-pickup shipment's latest status and applies it (moving PICKUP_SCHEDULED to PICKED_UP once collected). */
+/** Refreshes the reverse-shipment tracking status for the legacy whole-order return, moving PICKUP_SCHEDULED to PICKED_UP once collected. */
 export async function refreshReturnPickupStatusAction(orderId: string) {
   await requireAdminAction();
 
   try {
     const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
-    if (order.returnPorterReconciliationRequired) {
-      throw new Error("Pickup outcome is uncertain. Verify the pickup with Porter before refreshing status.");
+    if (order.returnShippingReconciliationRequired) {
+      throw new Error("Shipment outcome is uncertain. Verify with the provider before refreshing status.");
     }
-    if (!order.returnPorterOrderId || order.returnPorterOrderId === "DISPATCHING") {
-      throw new Error("This return has not been dispatched for pickup yet.");
+    if (!order.returnShippingOrderId || order.returnShippingOrderId === "CREATING") {
+      throw new Error("This return does not have an active shipment yet.");
     }
 
-    const { status } = await getPorterDeliveryStatus(order.returnPorterOrderId);
-    await applyReturnPorterStatus(orderId, status);
+    const tracking = await trackShipment({ awbCode: order.returnShippingAwbCode, shippingShipmentId: order.returnShippingShipmentId });
+    await applyReturnShippingStatus(orderId, tracking.rawStatus);
+    if (tracking.trackingUrl) {
+      await prisma.order.update({ where: { id: orderId }, data: { returnShippingTrackingUrl: tracking.trackingUrl } });
+    }
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Could not refresh pickup status.";
-    console.error("[porter] Return pickup status refresh failed for order", orderId, error);
+    const message = error instanceof Error ? error.message : "Could not refresh shipment status.";
+    console.error("[shipping] Return shipment status refresh failed for order", orderId, error);
     redirect(`/admin/orders/${orderId}?error=${encodeURIComponent(message)}`);
   }
 
@@ -490,10 +672,10 @@ export async function refreshReturnPickupStatusAction(orderId: string) {
 
 /**
  * Admin confirms the returned item is physically back at the warehouse —
- * the manual fallback for when Porter's own tracking doesn't reliably
- * report pickup/delivery. Automatically requests the refund (see
- * markReturnReceived), which is what makes the existing Refund card's
- * Approve/Reject buttons appear below.
+ * the manual fallback for when tracking doesn't reliably report pickup or
+ * delivery. Automatically requests the refund (see markReturnReceived),
+ * which is what makes the existing Refund card's Approve/Reject buttons
+ * appear below.
  */
 export async function markReturnReceivedAction(orderId: string, formData: FormData) {
   await requireAdminAction();
@@ -522,7 +704,7 @@ export async function markReturnReceivedAction(orderId: string, formData: FormDa
 // `orderId` is only used to redirect back to the right order detail page.
 // ---------------------------------------------------------------------------
 
-/** Approves a pending partial return — next step is dispatching a reverse pickup for it. */
+/** Approves a pending partial return — next step is creating a reverse shipment for it. */
 export async function approvePartialReturnAction(orderId: string, returnId: string, formData: FormData) {
   await requireAdminAction();
   const adminNote = String(formData.get("returnAdminNote") ?? "").trim();
@@ -552,87 +734,104 @@ export async function rejectPartialReturnAction(orderId: string, returnId: strin
 }
 
 /**
- * Dispatches a reverse Porter pickup for one approved partial return. Uses
- * `return-{returnId}` as the Porter request reference (never
- * `return-{orderId}`) so multiple returns on the same order never collide on
- * one Porter shipment.
+ * Creates a reverse shipment for one approved partial return. Uses
+ * `return-{returnId}` as the shipping reference (never `return-{orderId}`)
+ * so multiple returns on the same order never collide on one shipment, and
+ * builds the package from ONLY this return's OrderReturnItem contents/
+ * quantities — never the full original order (see buildPackage and
+ * lib/order-returns/service.ts).
  */
-export async function dispatchPartialReturnPickupAction(orderId: string, returnId: string) {
+export async function dispatchPartialReturnPickupAction(orderId: string, returnId: string, formData: FormData) {
   await requireAdminAction();
   let claimed = false;
+  let shipmentCreated = false;
+  const courierCompanyId = String(formData.get("courierCompanyId") ?? "").trim() || undefined;
+  const confirmDefaultDimensions = formData.get("confirmDefaultDimensions") === "on";
 
   try {
     const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
-    const orderReturn = await prisma.orderReturn.findUniqueOrThrow({ where: { id: returnId } });
+    const orderReturn = await prisma.orderReturn.findUniqueOrThrow({
+      where: { id: returnId },
+      include: { items: { include: { orderItem: { include: { listing: true } } } } },
+    });
 
     if (orderReturn.orderId !== orderId) throw new Error("This return does not belong to this order.");
     if (orderReturn.status !== "APPROVED") throw new Error("This return has not been approved yet.");
-    if (orderReturn.porterReconciliationRequired) {
-      throw new Error("Pickup outcome is uncertain. Verify the pickup with Porter before dispatching again.");
+    if (orderReturn.shippingReconciliationRequired) {
+      throw new Error("Shipment outcome is uncertain. Verify with the provider before creating another.");
     }
-    if (orderReturn.porterOrderId) throw new Error("A pickup has already been dispatched for this return.");
-    assertPorterConfigured();
-    if (
-      process.env.NODE_ENV === "production" &&
-      (!process.env.WAREHOUSE_CONTACT_NAME ||
-        !process.env.WAREHOUSE_PHONE ||
-        !process.env.WAREHOUSE_ADDRESS_LINE1 ||
-        !process.env.WAREHOUSE_CITY ||
-        !/^\d{6}$/.test(process.env.WAREHOUSE_PINCODE ?? ""))
-    ) {
-      throw new Error("Production warehouse configuration is incomplete.");
+    if (orderReturn.shippingOrderId) throw new Error("A shipment has already been created for this return.");
+    assertShippingConfigured();
+    assertWarehouseConfiguredInProduction();
+
+    const pickup = customerAddressFrom(order);
+
+    // Only the returned items/quantities — never the full order (Part 22).
+    const built = buildPackage(
+      orderReturn.items.map((line) => ({
+        productName: line.orderItem.productName,
+        quantity: line.quantity,
+        weightKg: line.orderItem.listing?.weightKg != null ? Number(line.orderItem.listing.weightKg) : null,
+        lengthCm: line.orderItem.listing?.lengthCm != null ? Number(line.orderItem.listing.lengthCm) : null,
+        breadthCm: line.orderItem.listing?.breadthCm != null ? Number(line.orderItem.listing.breadthCm) : null,
+        heightCm: line.orderItem.listing?.heightCm != null ? Number(line.orderItem.listing.heightCm) : null,
+      }))
+    );
+    if (!built.usesRealDimensions && !confirmDefaultDimensions) {
+      throw new Error("This return has multiple different products — confirm the default parcel dimensions before creating a shipment.");
     }
 
-    const address = (order.deliveryAddress ?? {}) as DeliveryAddress;
-    const line1 = [address.flatNo, address.floor, address.area].filter(Boolean).join(", ");
-    const pickupPhone = address.phone || order.customerPhone;
-    if (!order.customerName.trim() || !/^\d{10}$/.test(pickupPhone) || !line1 || !address.city || !/^\d{6}$/.test(address.pincode ?? "")) {
-      throw new Error("Delivery address is incomplete. Contact name, phone, address, city, and pincode are required.");
-    }
-
-    if (!(await claimPartialReturnPickupDispatch(returnId))) {
-      throw new Error("A pickup has already been dispatched for this return.");
+    if (!(await claimPartialReturnShippingDispatch(returnId))) {
+      throw new Error("A shipment has already been created for this return.");
     }
     claimed = true;
 
-    const result = await createPorterDelivery({
-      orderId: `return-${returnId}`,
-      pickup: {
-        contactName: address.contactName || order.customerName,
-        contactPhone: pickupPhone,
-        line1,
-        line2: address.landmark ?? "",
-        city: address.city ?? "",
-        pincode: address.pincode ?? "",
-      },
-      drop: {
-        contactName: process.env.WAREHOUSE_CONTACT_NAME!,
-        contactPhone: process.env.WAREHOUSE_PHONE!,
-        line1: process.env.WAREHOUSE_ADDRESS_LINE1!,
-        city: process.env.WAREHOUSE_CITY!,
-        pincode: process.env.WAREHOUSE_PINCODE!,
-      },
-      amount: Number(order.amount),
+    const created = await createReverseShipment({
+      referenceId: `return-${returnId}`,
+      pickup,
+      drop: warehouseAddress(),
+      package: built.package,
+      items: orderReturn.items.map((line) => ({
+        name: line.orderItem.productName,
+        sku: line.orderItem.listing?.sku ?? null,
+        quantity: line.quantity,
+        unitPrice: Number(line.orderItem.unitPrice),
+      })),
+      declaredValue: orderReturn.items.reduce((sum, line) => sum + Number(line.orderItem.unitPrice) * line.quantity, 0),
       instructions: `Return #${returnId.slice(-6)} pickup for Deep Automobiles order ${order.id}`,
     });
+    shipmentCreated = true;
 
-    if (!result.porterOrderId) {
-      throw new PorterRequestError("Porter returned no delivery identifier; reconciliation is required.", { uncertain: true });
+    if (!created.shippingShipmentId) {
+      throw new ShippingProviderError("Shiprocket returned no shipment identifier; reconciliation is required.", { uncertain: true });
     }
 
-    if (!(await completePartialReturnPickupDispatch(returnId, result))) {
-      throw new Error("Return pickup claim is no longer current.");
+    const awb = await assignAwb(created.shippingShipmentId, courierCompanyId);
+    const pickupResult = await schedulePickup(created.shippingShipmentId);
+
+    if (
+      !(await completePartialReturnShippingDispatch(returnId, {
+        provider: "SHIPROCKET",
+        shippingOrderId: created.shippingOrderId,
+        shippingShipmentId: created.shippingShipmentId,
+        awbCode: awb.awbCode,
+        courierName: awb.courierName,
+        status: pickupResult.status,
+        trackingUrl: null,
+      }))
+    ) {
+      throw new Error("Return shipment claim is no longer current.");
     }
   } catch (error) {
-    console.error("[porter] Partial return pickup dispatch failed for return", returnId, error);
+    console.error("[shipping] Partial return shipment creation failed for return", returnId, error);
     if (claimed) {
-      const failureMessage = error instanceof Error ? error.message : "Could not dispatch this return pickup.";
-      const uncertain = error instanceof PorterRequestError && error.uncertain;
-      await failPartialReturnPickupDispatch(returnId, failureMessage, uncertain).catch((dbError) => {
-        console.error("[porter] Also failed to record partial-return-dispatch-failed state for return", returnId, dbError);
+      const failureMessage = error instanceof Error ? error.message : "Could not create this return shipment.";
+      const uncertain = shipmentCreated || isUncertain(error);
+      await failPartialReturnShippingDispatch(returnId, failureMessage, uncertain).catch((dbError) => {
+        console.error("[shipping] Also failed to record partial-return-dispatch-failed state for return", returnId, dbError);
       });
     }
-    const message = error instanceof Error ? error.message : "Could not dispatch this return pickup.";
+    const message = error instanceof Error ? error.message : "Could not create this return shipment.";
     redirect(`/admin/orders/${orderId}?error=${encodeURIComponent(message)}`);
   }
 
@@ -641,25 +840,28 @@ export async function dispatchPartialReturnPickupAction(orderId: string, returnI
   revalidatePath("/admin/returns");
 }
 
-/** Polls Porter for one partial return's pickup shipment and applies the latest status. */
+/** Refreshes one partial return's reverse-shipment tracking status. */
 export async function refreshPartialReturnPickupStatusAction(orderId: string, returnId: string) {
   await requireAdminAction();
 
   try {
     const orderReturn = await prisma.orderReturn.findUniqueOrThrow({ where: { id: returnId } });
     if (orderReturn.orderId !== orderId) throw new Error("This return does not belong to this order.");
-    if (orderReturn.porterReconciliationRequired) {
-      throw new Error("Pickup outcome is uncertain. Verify the pickup with Porter before refreshing status.");
+    if (orderReturn.shippingReconciliationRequired) {
+      throw new Error("Shipment outcome is uncertain. Verify with the provider before refreshing status.");
     }
-    if (!orderReturn.porterOrderId || orderReturn.porterOrderId === "DISPATCHING") {
-      throw new Error("This return has not been dispatched for pickup yet.");
+    if (!orderReturn.shippingOrderId || orderReturn.shippingOrderId === "CREATING") {
+      throw new Error("This return does not have an active shipment yet.");
     }
 
-    const { status } = await getPorterDeliveryStatus(orderReturn.porterOrderId);
-    await applyPartialReturnPorterStatus(returnId, status);
+    const tracking = await trackShipment({ awbCode: orderReturn.shippingAwbCode, shippingShipmentId: orderReturn.shippingShipmentId });
+    await applyPartialReturnShippingStatus(returnId, tracking.rawStatus);
+    if (tracking.trackingUrl) {
+      await prisma.orderReturn.update({ where: { id: returnId }, data: { shippingTrackingUrl: tracking.trackingUrl } });
+    }
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Could not refresh pickup status.";
-    console.error("[porter] Partial return pickup status refresh failed for return", returnId, error);
+    const message = error instanceof Error ? error.message : "Could not refresh shipment status.";
+    console.error("[shipping] Partial return shipment status refresh failed for return", returnId, error);
     redirect(`/admin/orders/${orderId}?error=${encodeURIComponent(message)}`);
   }
 
@@ -698,7 +900,8 @@ export async function markPartialReturnReceivedAction(orderId: string, returnId:
  * this return's amount, using createRazorpayRefund's existing
  * amountInPaise parameter (already supports partial amounts). Never touches
  * Order.status/paymentStatus — a partial return is not a whole-order
- * cancellation.
+ * cancellation. Razorpay/refund logic is completely independent of the
+ * shipping migration (see lib/razorpay.ts, untouched).
  */
 export async function approvePartialRefundAction(orderId: string, returnId: string, formData: FormData) {
   await requireAdminAction();
@@ -766,3 +969,4 @@ export async function rejectPartialRefundAction(orderId: string, returnId: strin
   revalidatePath("/admin/orders");
   revalidatePath("/admin/returns");
 }
+

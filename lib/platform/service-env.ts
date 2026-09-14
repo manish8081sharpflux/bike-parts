@@ -35,9 +35,18 @@ const platformEnvSchema = z.object({
   RAZORPAY_KEY_ID: z.string().optional(),
   RAZORPAY_KEY_SECRET: z.string().optional(),
   RAZORPAY_WEBHOOK_SECRET: z.string().optional(),
+  // Legacy provider — no longer the active shipping provider (see
+  // SHIPPING_PROVIDER/SHIPROCKET_* below), kept only so lib/porter.ts can
+  // still track/cancel shipments dispatched before the Shiprocket
+  // migration (see the migration note on Order.shippingProvider).
   PORTER_API_KEY: z.string().optional(),
   PORTER_API_BASE_URL: z.string().optional(),
   PORTER_CLIENT_ID: z.string().optional(),
+  SHIPPING_PROVIDER: z.string().optional(),
+  SHIPROCKET_EMAIL: z.string().optional(),
+  SHIPROCKET_PASSWORD: z.string().optional(),
+  SHIPROCKET_API_BASE_URL: z.string().optional(),
+  SHIPROCKET_PICKUP_LOCATION: z.string().optional(),
   ADMIN_EMAIL: z.string().optional(),
   ADMIN_PASSWORD: z.string().optional(),
   ADMIN_SESSION_SECRET: z.string().optional(),
@@ -67,6 +76,13 @@ type ServiceStatus = {
   requiredInProduction: boolean;
   installed: boolean;
   configured: boolean;
+  /**
+   * Finer-grained than `configured` — distinguishes "nothing set up yet"
+   * from "partially set up, likely a mistake" (e.g. SHIPROCKET_EMAIL set
+   * without SHIPROCKET_PASSWORD). `configured` above is just
+   * `configState === "configured"`, kept for existing callers.
+   */
+  configState: "configured" | "not_configured" | "misconfigured";
   note: string;
 };
 
@@ -74,8 +90,17 @@ function hasAll(keys: Array<keyof PlatformEnv>) {
   return keys.every((key) => Boolean(platformEnv[key]));
 }
 
+function computeConfigState(requiredEnv: Array<keyof PlatformEnv>, installed: boolean): ServiceStatus["configState"] {
+  if (!installed) return "not_configured";
+  if (requiredEnv.length === 0) return "configured";
+  const presentCount = requiredEnv.filter((key) => Boolean(platformEnv[key])).length;
+  if (presentCount === requiredEnv.length) return "configured";
+  if (presentCount === 0) return "not_configured";
+  return "misconfigured";
+}
+
 export function getPlatformServices(): ServiceStatus[] {
-  const services: Array<Omit<ServiceStatus, "configured">> = [
+  const services: Array<Omit<ServiceStatus, "configured" | "configState">> = [
     {
       name: "Next.js app router",
       group: "frontend",
@@ -240,15 +265,15 @@ export function getPlatformServices(): ServiceStatus[] {
       note: "Order creation, checkout, and signature verification are implemented in lib/razorpay.ts.",
     },
     {
-      name: "Porter delivery",
+      name: "Shiprocket shipping",
       group: "backend",
-      requiredEnv: ["PORTER_API_KEY"],
-      // Whether Porter is load-bearing depends on the deployment (some
+      requiredEnv: ["SHIPROCKET_EMAIL", "SHIPROCKET_PASSWORD", "SHIPROCKET_PICKUP_LOCATION"],
+      // Whether shipping is load-bearing depends on the deployment (some
       // operators dispatch deliveries manually/through another courier) —
       // not universally required the way payments/DB/cache are.
       requiredInProduction: false,
       installed: true,
-      note: "Quote/create/track wrapper is implemented in lib/porter.ts against Porter's Partner API v1 shape.",
+      note: "Generic shipping service (lib/shipping/service.ts) with Shiprocket as the active provider (lib/shipping/providers/shiprocket.ts) — auth/token caching, order creation, AWB, pickup, tracking, cancellation, reverse shipments. Historical Porter-provider shipments (dispatched before this migration) remain readable/cancellable via the frozen lib/porter.ts, but no new shipment is ever created through Porter.",
     },
     {
       name: "Admin panel",
@@ -276,10 +301,14 @@ export function getPlatformServices(): ServiceStatus[] {
     },
   ];
 
-  return services.map((service) => ({
-    ...service,
-    configured: service.installed && hasAll(service.requiredEnv),
-  }));
+  return services.map((service) => {
+    const configState = computeConfigState(service.requiredEnv, service.installed);
+    return {
+      ...service,
+      configured: service.installed && hasAll(service.requiredEnv),
+      configState,
+    };
+  });
 }
 
 export function getMeilisearchBaseUrl() {

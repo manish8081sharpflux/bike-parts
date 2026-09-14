@@ -15,7 +15,7 @@ export async function GET() {
   // production traffic (see requiredInProduction's doc comment in
   // lib/platform/service-env.ts) — never on whether every optional
   // integration (Meilisearch, Sentry, WhatsApp, Firebase, Resend, Cloudflare
-  // Images, Better Auth, PostHog, Porter) happens to be configured.
+  // Images, Better Auth, PostHog, Shiprocket shipping) happens to be configured.
   // Meilisearch in particular is a derived index with a PostgreSQL
   // fallback: being unconfigured, or configured but currently unreachable
   // (`online: false` above), is reported for visibility but never flips

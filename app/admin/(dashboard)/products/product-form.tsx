@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { InputHTMLAttributes, ReactNode } from "react";
+import type { ChangeEvent, InputHTMLAttributes, ReactNode } from "react";
 import { useFormStatus } from "react-dom";
 import Link from "next/link";
 import { Check, ChevronDown, Loader2, Package, Save } from "lucide-react";
@@ -23,6 +23,7 @@ type Values = {
   specifications?: Specification[]; compatibleVehicles?: CompatibleVehicle[]; compatibleModels?: string[];
   features?: string[]; packageContents?: string[]; packIncludes?: string | null; searchTags?: string[];
   material?: string | null; finish?: string | null; weightKg?: string | number | null;
+  lengthCm?: string | number | null; breadthCm?: string | number | null; heightCm?: string | number | null;
   warrantyMonths?: number | null; countryOfOrigin?: string | null; offerLabel?: string | null;
   deliveryDaysMin?: number | string | null; deliveryDaysMax?: number | string | null;
 };
@@ -219,6 +220,61 @@ function Combobox({
     </label>
   );
 }
+/**
+ * A native <input type="file" multiple> replaces its entire FileList on every
+ * pick — there's no browser-level way to "add more" across two separate
+ * picker interactions, so a second selection silently wiped out the first.
+ * This keeps the chosen files in React state across picks and rebuilds the
+ * input's FileList (via the DataTransfer trick, the standard way to set a
+ * file input's files programmatically) so the combined set is what actually
+ * submits under `name`.
+ */
+function GalleryFileUpload({ name, accept, max }: { name: string; accept: string; max: number }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [files, setFiles] = useState<File[]>([]);
+
+  const syncInput = (next: File[]) => {
+    const transfer = new DataTransfer();
+    next.forEach((file) => transfer.items.add(file));
+    if (inputRef.current) inputRef.current.files = transfer.files;
+  };
+
+  const handleChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const picked = Array.from(event.target.files ?? []);
+    const combined = [...files, ...picked].slice(0, max);
+    setFiles(combined);
+    syncInput(combined);
+  };
+
+  const removeAt = (index: number) => {
+    const next = files.filter((_, i) => i !== index);
+    setFiles(next);
+    syncInput(next);
+  };
+
+  return (
+    <div className="flex flex-col gap-2">
+      <input ref={inputRef} type="file" name={name} multiple accept={accept} onChange={handleChange} className={inputClass} />
+      {files.length ? (
+        <ul className="flex flex-wrap gap-2">
+          {files.map((file, index) => (
+            <li key={`${file.name}-${file.lastModified}-${index}`} className="flex max-w-full items-center gap-1.5 rounded-full bg-orange-50 py-1 pl-3 pr-1.5 text-xs font-medium text-orange-700">
+              <span className="max-w-[10rem] truncate">{file.name}</span>
+              <button
+                type="button"
+                onClick={() => removeAt(index)}
+                aria-label={`Remove ${file.name}`}
+                className="grid size-4 shrink-0 place-items-center rounded-full text-orange-700 hover:bg-orange-100"
+              >
+                ×
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
 type Column = { key: string; label: string; placeholder?: string };
 function Rows({ name, columns, initial, addLabel, vehicle = false }: {
   name: string; columns: Column[]; initial: Record<string, string>[]; addLabel: string; vehicle?: boolean;
@@ -322,7 +378,10 @@ export function ProductForm({ action, defaultValues: v = {}, submitLabel }: {
       <label className="flex flex-col gap-1 text-sm font-semibold">Gallery Images / Additional Photos
         <textarea name="images" defaultValue={v.images?.join("\n") ?? ""} rows={2} placeholder="One image URL per line" className={inputClass} />
       </label>
-      <Field label="Upload Additional Photos" name="imageFiles" type="file" multiple accept="image/jpeg,image/png,image/webp" />
+      <label className="flex flex-col gap-1 text-sm font-semibold text-zinc-700">
+        Upload Additional Photos
+        <GalleryFileUpload name="imageFiles" accept="image/jpeg,image/png,image/webp" max={MAX_GALLERY_IMAGES} />
+      </label>
       <p className="text-xs text-zinc-500">Gallery uploads are added to the URLs above. Up to {MAX_GALLERY_IMAGES} gallery images total, including URLs and uploads, plus one separate main image. Maximum {MAX_IMAGE_MB} MB per upload.</p>
     </Section>
     <Section title="Search Tags">
@@ -357,10 +416,14 @@ export function ProductForm({ action, defaultValues: v = {}, submitLabel }: {
       ]} />
     </Section>
     <details className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm"><summary className="cursor-pointer text-sm font-bold text-zinc-800">Additional details <span className="ml-2 text-xs font-normal text-zinc-500">Material, warranty, origin & more</span></summary>
-      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+      <p className="mt-4 text-xs text-zinc-500">Weight and dimensions are required to create a shipment for an order containing this product — leave blank for now and set them before the first order ships.</p>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         <Field label="Material" name="material" defaultValue={v.material ?? ""} />
         <Field label="Color / Finish" name="finish" defaultValue={v.finish ?? ""} />
         <Field label="Weight (kg)" name="weightKg" type="number" min={0} step="0.001" defaultValue={v.weightKg ?? ""} />
+        <Field label="Length (cm)" name="lengthCm" type="number" min={0} step="0.01" defaultValue={v.lengthCm ?? ""} />
+        <Field label="Breadth (cm)" name="breadthCm" type="number" min={0} step="0.01" defaultValue={v.breadthCm ?? ""} />
+        <Field label="Height (cm)" name="heightCm" type="number" min={0} step="0.01" defaultValue={v.heightCm ?? ""} />
         <Field label="Warranty (months)" name="warrantyMonths" type="number" min={0} step={1} defaultValue={v.warrantyMonths ?? ""} />
         <Field label="Country of Origin" name="countryOfOrigin" defaultValue={v.countryOfOrigin ?? ""} />
         <Field label="Offer Badge" name="offerLabel" defaultValue={v.offerLabel ?? ""} />

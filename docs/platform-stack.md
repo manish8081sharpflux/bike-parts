@@ -87,9 +87,12 @@ values are exposed to the browser.
   a breaking `datasource.url` change — downgraded so `prisma generate` /
   `prisma migrate dev` work the classic way against `DATABASE_URL`).
 - **Schema**: `Order`/`OrderItem`/`OrderEvent` extended for payments and
-  delivery (`paymentStatus`, `razorpayOrderId/PaymentId/Signature`,
-  `porterOrderId/Status/TrackingUrl`, `taxAmount`, denormalized order-item
-  snapshots). `User.email` is now optional and `User.phone` unique. Customer
+  shipping (`paymentStatus`, `razorpayOrderId/PaymentId/Signature`,
+  `shippingProvider/OrderId/ShipmentId/AwbCode/CourierName/Status/TrackingUrl`,
+  `taxAmount`, denormalized order-item snapshots) — `shippingProvider` is a
+  `ShippingProvider` enum (`PORTER` | `SHIPROCKET`) so historical shipments
+  from before the Shiprocket migration stay honestly attributed; see
+  "Shipping" below. `User.email` is now optional and `User.phone` unique. Customer
   login uses OTP verification and a server-side session cookie.
   `BikePartListing.sellerId` is optional so admin-created products don't need a
   marketplace seller.
@@ -99,25 +102,41 @@ values are exposed to the browser.
   `middleware.ts` → `proxy.ts`), with a second check inside every admin
   Server Action/page per Next's own guidance (proxy alone isn't enough).
 - **Admin panel** (`/admin`): dashboard (order/revenue counts, low stock),
-  orders (filter, detail, status update, Porter dispatch + tracking refresh),
-  products (list, create, edit, delete/archive). Reads run directly via
+  orders (filter, detail, status update, shipment creation + tracking
+  refresh via the generic shipping service), products (list, create, edit,
+  delete/archive, including shipping weight/dimensions). Reads run directly via
   Prisma in Server Components; writes are Server Actions in
   `lib/actions/admin-*.ts`.
 - **Checkout**: `POST /api/checkout` creates a DB `Order` + a Razorpay order;
   the storefront opens Razorpay Checkout.js, then `POST /api/checkout/verify`
   checks the payment signature and marks the order paid.
   `POST /api/webhooks/razorpay` is a webhook safety net for the `payment.captured` event. Checkout resolves prices and GST from active `BikePartListing` rows server-side; delivery charge and discount are also server-defined.
-- **Delivery**: `lib/porter.ts` wraps Porter's commonly documented Partner
-  API v1 shape (quote/create/track). Porter's actual contract is
-  partner-specific — adjust `PORTER_API_BASE_URL` and the payload builders in
-  that file to match your partner docs if they differ.
-  Production requires `PORTER_ENV=production`, an explicit non-UAT
-  `PORTER_API_BASE_URL`, all warehouse address variables, and uses a bounded
-  HTTP timeout. Uncertain dispatch outcomes remain marked for reconciliation;
-  `pnpm reconcile:porter` reports them without retrying delivery creation.
+- **Shipping**: `lib/shipping/` is a generic, provider-neutral service
+  (`types.ts`, `service.ts`, `package.ts`, `status-mapping.ts`,
+  `admin-serviceability.ts`) — the rest of the app depends only on
+  `lib/shipping/service.ts` (`createShipment`, `createReverseShipment`,
+  `assignAwb`, `schedulePickup`, `trackShipment`, `cancelShipment`,
+  `checkServiceability`), never on a provider file directly. Shiprocket
+  (`lib/shipping/providers/shiprocket.ts`) is the only implemented provider,
+  selected via `SHIPPING_PROVIDER=SHIPROCKET`, built against Shiprocket's
+  documented External API v1 (auth/login, orders/create/adhoc,
+  orders/create/return, courier/assign/awb, courier/generate/pickup,
+  courier/track/awb, orders/cancel, courier/serviceability). Auth token is
+  cached in-memory (~9 days, refreshed on a 401) — never re-authenticates
+  per request. Dispatch (forward and reverse) uses the same
+  claim-before-mutate pattern as the old Porter dispatch: a placeholder
+  (`shippingOrderId = "CREATING"`) blocks a double-click from creating two
+  shipments, and any failure after the provider has actually created
+  something is treated as uncertain (never automatically retried) and
+  flagged `shippingReconciliationRequired`. `pnpm reconcile:shipping`
+  reports all of that (forward, legacy whole-order return, and
+  item/quantity-level partial-return shipments) without retrying anything.
+  Historical Porter-provider shipments (dispatched before this migration,
+  `shippingProvider = "PORTER"`) remain trackable/cancellable through the
+  frozen `lib/porter.ts` — never re-dispatched through Shiprocket.
 - **First-time setup**:
   ```bash
-  # fill in DATABASE_URL, RAZORPAY_KEY_ID/SECRET, PORTER_API_KEY in .env.local
+  # fill in DATABASE_URL, RAZORPAY_KEY_ID/SECRET, SHIPROCKET_EMAIL/PASSWORD/PICKUP_LOCATION in .env.local
   pnpm db:migrate    # creates tables from prisma/schema.prisma
   pnpm dev
   # visit /admin/login with ADMIN_EMAIL / ADMIN_PASSWORD from .env.local

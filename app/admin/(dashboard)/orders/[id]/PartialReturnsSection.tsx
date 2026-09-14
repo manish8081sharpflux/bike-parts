@@ -9,6 +9,7 @@ import {
   rejectPartialRefundAction,
   rejectPartialReturnAction,
 } from "@/lib/actions/admin-orders";
+import { ShipmentDispatchForm } from "./ShipmentDispatchForm";
 
 type PartialReturn = {
   id: string;
@@ -16,11 +17,15 @@ type PartialReturn = {
   reason: string;
   adminNote: string | null;
   condition: "RESELLABLE" | "DAMAGED" | null;
-  porterOrderId: string | null;
-  porterStatus: string | null;
-  porterTrackingUrl: string | null;
-  porterReconciliationRequired: boolean;
-  porterLastError: string | null;
+  shippingProvider: "PORTER" | "SHIPROCKET" | null;
+  shippingOrderId: string | null;
+  shippingShipmentId: string | null;
+  shippingAwbCode: string | null;
+  shippingCourierName: string | null;
+  shippingStatus: string | null;
+  shippingTrackingUrl: string | null;
+  shippingReconciliationRequired: boolean;
+  shippingLastError: string | null;
   refundStatus: "NONE" | "REQUESTED" | "PROCESSING" | "REFUNDED" | "FAILED";
   refundAmount: number | null;
   refundFailureReason: string | null;
@@ -113,34 +118,44 @@ function PartialReturnCard({ orderId, orderReturn, index }: { orderId: string; o
           </form>
         </div>
       ) : orderReturn.status === "APPROVED" ? (
-        orderReturn.porterReconciliationRequired ? (
+        orderReturn.shippingReconciliationRequired ? (
           <div className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
-            <p className="font-bold">Pickup outcome is uncertain.</p>
-            <p className="mt-1">Verify the pickup with Porter before dispatching again.</p>
-            {orderReturn.porterLastError ? <p className="mt-2 text-[11px] text-amber-700">{orderReturn.porterLastError}</p> : null}
+            <p className="font-bold">Shipment outcome is uncertain.</p>
+            <p className="mt-1">Verify with the shipping provider before creating another shipment.</p>
+            {orderReturn.shippingLastError ? <p className="mt-2 text-[11px] text-amber-700">{orderReturn.shippingLastError}</p> : null}
           </div>
         ) : (
-          <form action={boundDispatch} className="mt-3">
-            <button type="submit" className="h-9 w-full rounded-lg bg-[#ff4b1f] text-xs font-bold text-white hover:bg-[#e8330e]">
-              Dispatch pickup with Porter
-            </button>
-          </form>
+          <div className="mt-3">
+            <ShipmentDispatchForm
+              action={boundDispatch}
+              serviceabilityUrl={`/api/admin/orders/${orderId}/returns/${orderReturn.id}/serviceability`}
+              submitLabel="Create Return Pickup"
+              description="Creates a reverse shipment for only this return's item(s) — the customer's address becomes the pickup point, the warehouse the drop."
+            />
+          </div>
         )
       ) : orderReturn.status === "PICKUP_SCHEDULED" || orderReturn.status === "PICKED_UP" ? (
         <div className="mt-3 flex flex-col gap-2">
-          {orderReturn.porterOrderId && orderReturn.porterOrderId !== "DISPATCHING" ? (
+          {orderReturn.shippingOrderId && orderReturn.shippingOrderId !== "CREATING" ? (
             <p className="text-xs text-zinc-500">
-              Porter order: <span className="font-mono">{orderReturn.porterOrderId}</span> &bull; {orderReturn.porterStatus ?? "unknown"}
+              Provider: <span className="font-bold">{orderReturn.shippingProvider ?? "Shiprocket"}</span> &bull; Courier:{" "}
+              <span className="font-bold">{orderReturn.shippingCourierName ?? "unknown"}</span>
+              {orderReturn.shippingAwbCode ? (
+                <>
+                  {" "}
+                  &bull; AWB: <span className="font-mono">{orderReturn.shippingAwbCode}</span>
+                </>
+              ) : null}
             </p>
           ) : null}
-          {orderReturn.porterTrackingUrl ? (
-            <a href={orderReturn.porterTrackingUrl} target="_blank" rel="noreferrer" className="text-xs font-bold text-[#ff4b1f]">
-              Track pickup ↗
+          {orderReturn.shippingTrackingUrl ? (
+            <a href={orderReturn.shippingTrackingUrl} target="_blank" rel="noreferrer" className="text-xs font-bold text-[#ff4b1f]">
+              Track Shipment ↗
             </a>
           ) : null}
           <form action={boundRefresh}>
             <button type="submit" className="h-9 w-full rounded-lg border border-zinc-200 text-xs font-bold text-zinc-700 hover:bg-zinc-50">
-              Refresh pickup status
+              Refresh Tracking
             </button>
           </form>
           <form action={boundMarkReceived} className="flex flex-col gap-2">

@@ -115,9 +115,17 @@ export function HomeClient({ products }: { products: Product[] }) {
       | "returnReason"
       | "returnAdminNote"
       | "returnRequestedAt"
-      | "returnPorterTrackingUrl"
+      | "returnShippingProvider"
+      | "returnShippingTrackingUrl"
+      | "returnShippingAwbCode"
+      | "returnShippingCourierName"
       | "returnReceivedAt"
       | "partialReturns"
+      | "shippingProvider"
+      | "shippingStatus"
+      | "shippingTrackingUrl"
+      | "shippingAwbCode"
+      | "shippingCourierName"
     > & { deliveryCharge: number; discount: number }
   ): Order | null => {
     if (overrides.items.length === 0) return null;
@@ -131,6 +139,11 @@ export function HomeClient({ products }: { products: Product[] }) {
       ...overrides,
       dbId: overrides.id,
       isPaid: true,
+      shippingProvider: null,
+      shippingStatus: null,
+      shippingTrackingUrl: null,
+      shippingAwbCode: null,
+      shippingCourierName: null,
       refundStatus: "none",
       refundReason: null,
       refundAdminNote: null,
@@ -141,7 +154,10 @@ export function HomeClient({ products }: { products: Product[] }) {
       returnReason: null,
       returnAdminNote: null,
       returnRequestedAt: null,
-      returnPorterTrackingUrl: null,
+      returnShippingProvider: null,
+      returnShippingTrackingUrl: null,
+      returnShippingAwbCode: null,
+      returnShippingCourierName: null,
       returnReceivedAt: null,
       partialReturns: [],
       itemTotal,
@@ -1002,7 +1018,11 @@ export function HomeClient({ products }: { products: Product[] }) {
           deliveryCharge: number;
           discount: number;
           amount: number;
-          porterStatus: string | null;
+          shippingProvider: "PORTER" | "SHIPROCKET" | null;
+          shippingStatus: string | null;
+          shippingTrackingUrl: string | null;
+          shippingAwbCode: string | null;
+          shippingCourierName: string | null;
           deliveryAddress: Partial<Address> | null;
           items: Array<{ id: string; listingId: string | null; canReview: boolean; review: CustomerReview | null; name: string; image: string | null; quantity: number; unitPrice: number; returnedQuantity: number; remainingReturnable: number }>;
           events: OrderEventEntry[];
@@ -1016,7 +1036,10 @@ export function HomeClient({ products }: { products: Product[] }) {
           returnReason: string | null;
           returnAdminNote: string | null;
           returnRequestedAt: number | null;
-          returnPorterTrackingUrl: string | null;
+          returnShippingProvider: "PORTER" | "SHIPROCKET" | null;
+          returnShippingTrackingUrl: string | null;
+          returnShippingAwbCode: string | null;
+          returnShippingCourierName: string | null;
           returnReceivedAt: number | null;
           partialReturns: Array<{
             id: string;
@@ -1027,8 +1050,11 @@ export function HomeClient({ products }: { products: Product[] }) {
             approvedAt: number | null;
             receivedAt: number | null;
             condition: "RESELLABLE" | "DAMAGED" | null;
-            porterStatus: string | null;
-            porterTrackingUrl: string | null;
+            shippingProvider: "PORTER" | "SHIPROCKET" | null;
+            shippingStatus: string | null;
+            shippingTrackingUrl: string | null;
+            shippingAwbCode: string | null;
+            shippingCourierName: string | null;
             refundStatus: string;
             refundAmount: number | null;
             refundProcessedAt: number | null;
@@ -1099,6 +1125,11 @@ export function HomeClient({ products }: { products: Product[] }) {
             placedAt: dbOrder.placedAt,
             status,
             isPaid: dbOrder.paymentStatus === "PAID",
+            shippingProvider: dbOrder.shippingProvider,
+            shippingStatus: dbOrder.shippingStatus,
+            shippingTrackingUrl: dbOrder.shippingTrackingUrl,
+            shippingAwbCode: dbOrder.shippingAwbCode,
+            shippingCourierName: dbOrder.shippingCourierName,
             refundStatus: mapDbRefundStatus(dbOrder.refundStatus),
             refundReason: dbOrder.refundReason,
             refundAdminNote: dbOrder.refundAdminNote,
@@ -1109,7 +1140,10 @@ export function HomeClient({ products }: { products: Product[] }) {
             returnReason: dbOrder.returnReason,
             returnAdminNote: dbOrder.returnAdminNote,
             returnRequestedAt: dbOrder.returnRequestedAt,
-            returnPorterTrackingUrl: dbOrder.returnPorterTrackingUrl,
+            returnShippingProvider: dbOrder.returnShippingProvider,
+            returnShippingTrackingUrl: dbOrder.returnShippingTrackingUrl,
+            returnShippingAwbCode: dbOrder.returnShippingAwbCode,
+            returnShippingCourierName: dbOrder.returnShippingCourierName,
             returnReceivedAt: dbOrder.returnReceivedAt,
             partialReturns: dbOrder.partialReturns.map((partialReturn) => ({
               id: partialReturn.id,
@@ -1120,8 +1154,11 @@ export function HomeClient({ products }: { products: Product[] }) {
               approvedAt: partialReturn.approvedAt,
               receivedAt: partialReturn.receivedAt,
               condition: partialReturn.condition,
-              porterStatus: partialReturn.porterStatus,
-              porterTrackingUrl: partialReturn.porterTrackingUrl,
+              shippingProvider: partialReturn.shippingProvider,
+              shippingStatus: partialReturn.shippingStatus,
+              shippingTrackingUrl: partialReturn.shippingTrackingUrl,
+              shippingAwbCode: partialReturn.shippingAwbCode,
+              shippingCourierName: partialReturn.shippingCourierName,
               refundStatus: mapDbPartialRefundStatus(partialReturn.refundStatus),
               refundAmount: partialReturn.refundAmount,
               refundProcessedAt: partialReturn.refundProcessedAt,
@@ -1132,8 +1169,8 @@ export function HomeClient({ products }: { products: Product[] }) {
                 ? "Your order was delivered"
                 : status === "cancelled"
                 ? "Your order has been cancelled"
-                : dbOrder.porterStatus
-                ? `Delivery status: ${dbOrder.porterStatus}`
+                : dbOrder.shippingStatus
+                ? `Delivery status: ${dbOrder.shippingStatus}`
                 : "Your order is being prepared",
             // Was hardcoded null for every real order — every customer with
             // an out-for-delivery/processing order literally saw the text

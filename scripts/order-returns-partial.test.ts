@@ -3,11 +3,11 @@ import test, { after } from "node:test";
 import { prisma } from "@/lib/db";
 import {
   approvePartialReturn,
-  applyPartialReturnPorterStatus,
+  applyPartialReturnShippingStatus,
   claimPartialRefundRequest,
-  claimPartialReturnPickupDispatch,
-  completePartialReturnPickupDispatch,
-  failPartialReturnPickupDispatch,
+  claimPartialReturnShippingDispatch,
+  completePartialReturnShippingDispatch,
+  failPartialReturnShippingDispatch,
   getReturnableQuantities,
   markPartialReturnReceived,
   markPartialRefundSucceeded,
@@ -229,14 +229,14 @@ test("an approved return continues to consume its quantity", async () => {
   );
 });
 
-// 12. Porter dispatch is scoped per-return, not per-order — two returns on
+// 12. Shipment dispatch is scoped per-return, not per-order — two returns on
 // the same order can each be claimed/dispatched independently. (The literal
-// `return-{returnId}` Porter request reference itself is composed in
+// `return-{returnId}` shipping reference itself is composed in
 // dispatchPartialReturnPickupAction, lib/actions/admin-orders.ts, which this
 // state-machine test file does not call since it would require a live
-// Porter network call — same convention scripts/order-return-state.test.ts
+// Shiprocket network call — same convention scripts/order-return-state.test.ts
 // already follows for the legacy flow.)
-test("Porter pickup dispatch is scoped to one return, not the whole order", async () => {
+test("shipment dispatch is scoped to one return, not the whole order", async () => {
   const user = await createUser();
   const { order } = await deliveredOrder(user.id, [
     { name: "Brake Pads", price: 500, quantity: 2, stock: 5 },
@@ -247,18 +247,18 @@ test("Porter pickup dispatch is scoped to one return, not the whole order", asyn
   await approvePartialReturn(returnA.id, "ok");
   await approvePartialReturn(returnB.id, "ok");
 
-  assert.equal(await claimPartialReturnPickupDispatch(returnA.id), true);
-  assert.equal(await claimPartialReturnPickupDispatch(returnB.id), true, "a second return on the same order must be independently dispatchable");
+  assert.equal(await claimPartialReturnShippingDispatch(returnA.id), true);
+  assert.equal(await claimPartialReturnShippingDispatch(returnB.id), true, "a second return on the same order must be independently dispatchable");
 
-  assert.equal(await completePartialReturnPickupDispatch(returnA.id, { porterOrderId: "porter-return-a", status: "created", trackingUrl: null }), true);
-  assert.equal(await completePartialReturnPickupDispatch(returnB.id, { porterOrderId: "porter-return-b", status: "created", trackingUrl: null }), true);
+  assert.equal(await completePartialReturnShippingDispatch(returnA.id, { provider: "SHIPROCKET", shippingOrderId: "sr-return-a", shippingShipmentId: null, awbCode: null, courierName: "Test Courier", status: "created", trackingUrl: null }), true);
+  assert.equal(await completePartialReturnShippingDispatch(returnB.id, { provider: "SHIPROCKET", shippingOrderId: "sr-return-b", shippingShipmentId: null, awbCode: null, courierName: "Test Courier", status: "created", trackingUrl: null }), true);
 
   const [finalA, finalB] = await Promise.all([
     prisma.orderReturn.findUniqueOrThrow({ where: { id: returnA.id } }),
     prisma.orderReturn.findUniqueOrThrow({ where: { id: returnB.id } }),
   ]);
-  assert.equal(finalA.porterOrderId, "porter-return-a");
-  assert.equal(finalB.porterOrderId, "porter-return-b");
+  assert.equal(finalA.shippingOrderId, "sr-return-a");
+  assert.equal(finalB.shippingOrderId, "sr-return-b");
 });
 
 // 13. duplicate reverse pickup is blocked
@@ -268,24 +268,24 @@ test("a duplicate pickup dispatch claim on the same return is blocked", async ()
   const created = await requestPartialReturn(user.id, order.id, { reason: "x", items: [{ orderItemId: order.items[0].id, quantity: 1 }] });
   await approvePartialReturn(created.id, "ok");
 
-  assert.equal(await claimPartialReturnPickupDispatch(created.id), true);
-  assert.equal(await claimPartialReturnPickupDispatch(created.id), false, "a second claim on the same return must not win");
+  assert.equal(await claimPartialReturnShippingDispatch(created.id), true);
+  assert.equal(await claimPartialReturnShippingDispatch(created.id), false, "a second claim on the same return must not win");
 });
 
 // 14. uncertain pickup outcome requires reconciliation and blocks retry
-test("an uncertain Porter pickup failure requires reconciliation and blocks retry", async () => {
+test("an uncertain shipment creation failure requires reconciliation and blocks retry", async () => {
   const user = await createUser();
   const { order } = await deliveredOrder(user.id, [{ name: "Brake Pads", price: 500, quantity: 2, stock: 5 }]);
   const created = await requestPartialReturn(user.id, order.id, { reason: "x", items: [{ orderItemId: order.items[0].id, quantity: 1 }] });
   await approvePartialReturn(created.id, "ok");
-  await claimPartialReturnPickupDispatch(created.id);
-  await failPartialReturnPickupDispatch(created.id, "Porter request outcome is uncertain.", true);
+  await claimPartialReturnShippingDispatch(created.id);
+  await failPartialReturnShippingDispatch(created.id, "Shiprocket request outcome is uncertain.", true);
 
   const afterFailure = await prisma.orderReturn.findUniqueOrThrow({ where: { id: created.id } });
-  assert.equal(afterFailure.porterOrderId, "DISPATCHING", "uncertain failure must not clear the claim");
-  assert.equal(afterFailure.porterReconciliationRequired, true);
+  assert.equal(afterFailure.shippingOrderId, "CREATING", "uncertain failure must not clear the claim");
+  assert.equal(afterFailure.shippingReconciliationRequired, true);
 
-  assert.equal(await claimPartialReturnPickupDispatch(created.id), false, "must not be re-dispatchable while reconciliation is required");
+  assert.equal(await claimPartialReturnShippingDispatch(created.id), false, "must not be re-dispatchable while reconciliation is required");
 });
 
 // 15. resellable partial return restores only the returned quantity
@@ -294,9 +294,9 @@ test("a resellable partial return restores only the returned quantity, not the f
   const { order, listings } = await deliveredOrder(user.id, [{ name: "Spark Plug", price: 100, quantity: 3, stock: 5 }]);
   const created = await requestPartialReturn(user.id, order.id, { reason: "one faulty", items: [{ orderItemId: order.items[0].id, quantity: 1 }] });
   await approvePartialReturn(created.id, "ok");
-  await claimPartialReturnPickupDispatch(created.id);
-  await completePartialReturnPickupDispatch(created.id, { porterOrderId: "porter-x", status: "created", trackingUrl: null });
-  await applyPartialReturnPorterStatus(created.id, "delivered");
+  await claimPartialReturnShippingDispatch(created.id);
+  await completePartialReturnShippingDispatch(created.id, { provider: "SHIPROCKET", shippingOrderId: "sr-x", shippingShipmentId: null, awbCode: null, courierName: "Test Courier", status: "created", trackingUrl: null });
+  await applyPartialReturnShippingStatus(created.id, "PICKED UP");
 
   const result = await markPartialReturnReceived(created.id, "ok", "RESELLABLE");
   assert.equal(result.received, true);
@@ -312,9 +312,9 @@ test("a damaged partial return restores zero stock", async () => {
   const { order, listings } = await deliveredOrder(user.id, [{ name: "Spark Plug", price: 100, quantity: 3, stock: 5 }]);
   const created = await requestPartialReturn(user.id, order.id, { reason: "one faulty", items: [{ orderItemId: order.items[0].id, quantity: 1 }] });
   await approvePartialReturn(created.id, "ok");
-  await claimPartialReturnPickupDispatch(created.id);
-  await completePartialReturnPickupDispatch(created.id, { porterOrderId: "porter-y", status: "created", trackingUrl: null });
-  await applyPartialReturnPorterStatus(created.id, "delivered");
+  await claimPartialReturnShippingDispatch(created.id);
+  await completePartialReturnShippingDispatch(created.id, { provider: "SHIPROCKET", shippingOrderId: "sr-y", shippingShipmentId: null, awbCode: null, courierName: "Test Courier", status: "created", trackingUrl: null });
+  await applyPartialReturnShippingStatus(created.id, "PICKED UP");
 
   const result = await markPartialReturnReceived(created.id, "cracked", "DAMAGED");
   assert.equal(result.received, true);
@@ -330,9 +330,9 @@ test("repeating mark-received on an already-received return does not double-rest
   const { order, listings } = await deliveredOrder(user.id, [{ name: "Spark Plug", price: 100, quantity: 3, stock: 5 }]);
   const created = await requestPartialReturn(user.id, order.id, { reason: "one faulty", items: [{ orderItemId: order.items[0].id, quantity: 1 }] });
   await approvePartialReturn(created.id, "ok");
-  await claimPartialReturnPickupDispatch(created.id);
-  await completePartialReturnPickupDispatch(created.id, { porterOrderId: "porter-z", status: "created", trackingUrl: null });
-  await applyPartialReturnPorterStatus(created.id, "delivered");
+  await claimPartialReturnShippingDispatch(created.id);
+  await completePartialReturnShippingDispatch(created.id, { provider: "SHIPROCKET", shippingOrderId: "sr-z", shippingShipmentId: null, awbCode: null, courierName: "Test Courier", status: "created", trackingUrl: null });
+  await applyPartialReturnShippingStatus(created.id, "PICKED UP");
 
   await markPartialReturnReceived(created.id, "ok", "RESELLABLE");
   const repeat = await markPartialReturnReceived(created.id, "ok again", "RESELLABLE");
@@ -351,9 +351,9 @@ test("refund amount uses OrderItem.unitPrice at purchase time, not the current l
 
   const created = await requestPartialReturn(user.id, order.id, { reason: "wrong size", items: [{ orderItemId: order.items[0].id, quantity: 1 }] });
   await approvePartialReturn(created.id, "ok");
-  await claimPartialReturnPickupDispatch(created.id);
-  await completePartialReturnPickupDispatch(created.id, { porterOrderId: "porter-refund", status: "created", trackingUrl: null });
-  await applyPartialReturnPorterStatus(created.id, "delivered");
+  await claimPartialReturnShippingDispatch(created.id);
+  await completePartialReturnShippingDispatch(created.id, { provider: "SHIPROCKET", shippingOrderId: "sr-refund", shippingShipmentId: null, awbCode: null, courierName: "Test Courier", status: "created", trackingUrl: null });
+  await applyPartialReturnShippingStatus(created.id, "PICKED UP");
   await markPartialReturnReceived(created.id, "ok", "RESELLABLE");
 
   const afterReceive = await prisma.orderReturn.findUniqueOrThrow({ where: { id: created.id } });
@@ -372,9 +372,9 @@ test("multiple partial refunds on one order never sum to more than the amount pa
   const returnB = await requestPartialReturn(user.id, order.id, { reason: "b", items: [{ orderItemId: order.items[1].id, quantity: 3 }] });
   for (const returnId of [returnA.id, returnB.id]) {
     await approvePartialReturn(returnId, "ok");
-    await claimPartialReturnPickupDispatch(returnId);
-    await completePartialReturnPickupDispatch(returnId, { porterOrderId: `porter-${returnId}`, status: "created", trackingUrl: null });
-    await applyPartialReturnPorterStatus(returnId, "delivered");
+    await claimPartialReturnShippingDispatch(returnId);
+    await completePartialReturnShippingDispatch(returnId, { provider: "SHIPROCKET", shippingOrderId: `sr-${returnId}`, shippingShipmentId: null, awbCode: null, courierName: "Test Courier", status: "created", trackingUrl: null });
+    await applyPartialReturnShippingStatus(returnId, "PICKED UP");
     await markPartialReturnReceived(returnId, "ok", "RESELLABLE");
   }
 

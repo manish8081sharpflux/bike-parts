@@ -3,10 +3,10 @@ import test, { after } from "node:test";
 import { prisma } from "@/lib/db";
 import {
   approveReturn,
-  applyReturnPorterStatus,
-  claimReturnPickupDispatch,
-  completeReturnPickupDispatch,
-  failReturnPickupDispatch,
+  applyReturnShippingStatus,
+  claimReturnShippingDispatch,
+  completeReturnShippingDispatch,
+  failReturnShippingDispatch,
   markReturnReceived,
   rejectReturn,
   requestReturn,
@@ -16,6 +16,16 @@ const suffix = `${Date.now()}-${process.pid}`;
 const orderIds: string[] = [];
 const userIds: string[] = [];
 const listingIds: string[] = [];
+
+const shipmentResult = (shippingOrderId: string) => ({
+  provider: "SHIPROCKET" as const,
+  shippingOrderId,
+  shippingShipmentId: `${shippingOrderId}-shipment`,
+  awbCode: `${shippingOrderId}-awb`,
+  courierName: "Test Courier",
+  status: "created",
+  trackingUrl: null,
+});
 
 async function deliveredOrder() {
   const user = await prisma.user.create({ data: { phone: `7${String(Date.now()).slice(-8)}${userIds.length}` } });
@@ -116,18 +126,18 @@ test("full happy path: request -> approve -> dispatch -> picked up -> received (
   assert.equal(await approveReturn(order.id, "Approved for pickup"), true);
   assert.equal((await prisma.order.findUniqueOrThrow({ where: { id: order.id } })).returnStatus, "APPROVED");
 
-  assert.equal(await claimReturnPickupDispatch(order.id), true);
-  assert.equal(await claimReturnPickupDispatch(order.id), false, "a second claim on the same order must not win");
+  assert.equal(await claimReturnShippingDispatch(order.id), true);
+  assert.equal(await claimReturnShippingDispatch(order.id), false, "a second claim on the same order must not win");
 
-  assert.equal(
-    await completeReturnPickupDispatch(order.id, { porterOrderId: "porter-return-1", status: "created", trackingUrl: null }),
-    true
-  );
+  assert.equal(await completeReturnShippingDispatch(order.id, shipmentResult("return-1")), true);
   const afterDispatch = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
   assert.equal(afterDispatch.returnStatus, "PICKUP_SCHEDULED");
-  assert.equal(afterDispatch.returnPorterOrderId, "porter-return-1");
+  assert.equal(afterDispatch.returnShippingOrderId, "return-1");
+  assert.equal(afterDispatch.returnShippingProvider, "SHIPROCKET");
+  assert.equal(afterDispatch.returnShippingAwbCode, "return-1-awb");
+  assert.equal(afterDispatch.returnShippingCourierName, "Test Courier");
 
-  const applied = await applyReturnPorterStatus(order.id, "delivered");
+  const applied = await applyReturnShippingStatus(order.id, "PICKED UP");
   assert.equal(applied.transitioned, true);
   assert.equal((await prisma.order.findUniqueOrThrow({ where: { id: order.id } })).returnStatus, "PICKED_UP");
 
@@ -163,9 +173,9 @@ test("mark received with condition DAMAGED does not restore stock", async () => 
   const { order, listing } = await deliveredOrderWithListing(3, 1);
   await requestReturn(order.id, "cracked");
   await approveReturn(order.id, "ok");
-  await claimReturnPickupDispatch(order.id);
-  await completeReturnPickupDispatch(order.id, { porterOrderId: "porter-return-damaged", status: "created", trackingUrl: null });
-  await applyReturnPorterStatus(order.id, "delivered");
+  await claimReturnShippingDispatch(order.id);
+  await completeReturnShippingDispatch(order.id, shipmentResult("return-damaged"));
+  await applyReturnShippingStatus(order.id, "PICKED UP");
 
   const result = await markReturnReceived(order.id, "Cracked casing, scrap", "DAMAGED");
   assert.equal(result.received, true);
@@ -187,41 +197,41 @@ test("mark received is a no-op outside PICKED_UP/PICKUP_SCHEDULED", async () => 
   assert.equal((await prisma.order.findUniqueOrThrow({ where: { id: order.id } })).returnStatus, "NONE");
 });
 
-test("definite Porter rejection clears the claim and allows a retry", async () => {
+test("definite provider rejection clears the claim and allows a retry", async () => {
   const order = await deliveredOrder();
   await approvedAndDispatchable(order);
 
-  assert.equal(await claimReturnPickupDispatch(order.id), true);
-  await failReturnPickupDispatch(order.id, "Porter rejected: invalid pickup address", false);
+  assert.equal(await claimReturnShippingDispatch(order.id), true);
+  await failReturnShippingDispatch(order.id, "Shiprocket rejected: invalid pickup address", false);
 
   const afterFailure = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
-  assert.equal(afterFailure.returnPorterOrderId, null, "definite failure must clear the claim");
-  assert.equal(afterFailure.returnPorterReconciliationRequired, false);
-  assert.equal(afterFailure.returnPorterLastError, "Porter rejected: invalid pickup address");
+  assert.equal(afterFailure.returnShippingOrderId, null, "definite failure must clear the claim");
+  assert.equal(afterFailure.returnShippingReconciliationRequired, false);
+  assert.equal(afterFailure.returnShippingLastError, "Shiprocket rejected: invalid pickup address");
 
   // Retry is allowed after a definite failure.
-  assert.equal(await claimReturnPickupDispatch(order.id), true);
+  assert.equal(await claimReturnShippingDispatch(order.id), true);
 });
 
-test("uncertain Porter failure (timeout) blocks retry and requires reconciliation", async () => {
+test("uncertain provider failure (timeout) blocks retry and requires reconciliation", async () => {
   const order = await deliveredOrder();
   await approvedAndDispatchable(order);
 
-  assert.equal(await claimReturnPickupDispatch(order.id), true);
-  await failReturnPickupDispatch(order.id, "Porter request outcome is uncertain.", true);
+  assert.equal(await claimReturnShippingDispatch(order.id), true);
+  await failReturnShippingDispatch(order.id, "Shiprocket request outcome is uncertain.", true);
 
   const afterFailure = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
-  assert.equal(afterFailure.returnPorterOrderId, "DISPATCHING", "uncertain failure must NOT clear the claim");
-  assert.equal(afterFailure.returnPorterStatus, "RECONCILIATION_REQUIRED");
-  assert.equal(afterFailure.returnPorterReconciliationRequired, true);
-  assert.equal(afterFailure.returnPorterLastError, "Porter request outcome is uncertain.");
+  assert.equal(afterFailure.returnShippingOrderId, "CREATING", "uncertain failure must NOT clear the claim");
+  assert.equal(afterFailure.returnShippingStatus, "RECONCILIATION_REQUIRED");
+  assert.equal(afterFailure.returnShippingReconciliationRequired, true);
+  assert.equal(afterFailure.returnShippingLastError, "Shiprocket request outcome is uncertain.");
 
-  // A reconciliation-required pickup can never be silently re-dispatched —
-  // the claim's WHERE clause requires returnPorterOrderId: null, which is
+  // A reconciliation-required shipment can never be silently re-created —
+  // the claim's WHERE clause requires returnShippingOrderId: null, which is
   // exactly what stays untouched here.
-  assert.equal(await claimReturnPickupDispatch(order.id), false, "must not be re-dispatchable while reconciliation is required");
+  assert.equal(await claimReturnShippingDispatch(order.id), false, "must not be re-dispatchable while reconciliation is required");
 
-  const events = await prisma.orderEvent.findMany({ where: { orderId: order.id, type: "RETURN_PICKUP_RECONCILIATION_REQUIRED" } });
+  const events = await prisma.orderEvent.findMany({ where: { orderId: order.id, type: "RETURN_SHIPMENT_RECONCILIATION_REQUIRED" } });
   assert.equal(events.length, 1, "reconciliation-required event must be recorded for operators to investigate");
 });
 

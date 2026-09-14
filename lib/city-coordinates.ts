@@ -1,12 +1,15 @@
-// Approximate city-center coordinates for the map on the order tracking
-// view. Nothing in this app captures a real street-level lat/lng for a
-// delivery address or a live rider position (see Order.deliveryAddress —
-// it's just flatNo/area/city/pincode text, and PorterAddress.lat/lng is
-// never actually populated by lib/porter.ts). Until real geocoding and a
-// live location feed from Porter are wired up, this is a best-effort
-// approximation: it plots the pickup city (the warehouse) and the drop
-// city (from the order's address) as city-center points, not the actual
-// doorstep — good enough to show a sensible route on a real map, not a
+// Approximate city-center coordinates for the demo tracking map — only ever
+// shown when an order has no real, provider-backed shipment yet (see
+// OrderComponents.tsx's gating on order.shippingProvider). Nothing in this
+// app captures a real street-level lat/lng for a delivery address or a live
+// courier position (see Order.deliveryAddress — it's just
+// flatNo/area/city/pincode text; ShippingAddress has no lat/lng field
+// either, see lib/shipping/types.ts). Once a real shipment exists, the
+// customer sees actual courier/AWB/tracking info instead (no map) — see the
+// "Shipment card" in OrderComponents.tsx. This file's coordinates are a
+// best-effort approximation for the pre-shipment fallback only: it plots
+// the pickup city (the warehouse) and the drop city (from the order's
+// address) as city-center points, not the actual doorstep — never a
 // substitute for genuine live GPS tracking.
 export const CITY_COORDINATES: Record<string, { lat: number; lng: number }> = {
   Patna: { lat: 25.5941, lng: 85.1376 },

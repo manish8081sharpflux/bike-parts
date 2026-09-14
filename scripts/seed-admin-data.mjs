@@ -407,9 +407,10 @@ const customerSeeds = [
 
 // Each entry's `timeline` is the status history to write as OrderEvents (oldest
 // first); the order's own `status` should match the timeline's last entry.
-// `dispatch` (optional) fills in Porter fields as if it had actually been
-// dispatched, matching what dispatchOrderAction/refreshDeliveryStatusAction
-// would have written.
+// `dispatch` (optional) fills in the generic shipping fields as if the order
+// had actually been dispatched through Shiprocket, matching what
+// dispatchOrderAction/refreshDeliveryStatusAction would have written (see
+// lib/shipping/service.ts).
 const orderSeeds = [
   {
     marker: "seed_order_01",
@@ -442,7 +443,7 @@ const orderSeeds = [
       { status: "OUT_FOR_DELIVERY", hoursAgo: 100, message: "Status changed to OUT_FOR_DELIVERY" },
       { status: "DELIVERED", hoursAgo: 96, message: "Status changed to DELIVERED" },
     ],
-    dispatch: { status: "delivered", trackingUrl: "https://track.porter.in/seed_order_01" },
+    dispatch: { status: "delivered", trackingUrl: "https://shiprocket.co/tracking/seed_order_01" },
   },
   {
     marker: "seed_order_02",
@@ -470,7 +471,7 @@ const orderSeeds = [
       { status: "SHIPPED", hoursAgo: 12, message: "Status changed to SHIPPED" },
       { status: "OUT_FOR_DELIVERY", hoursAgo: 2, message: "Status changed to OUT_FOR_DELIVERY" },
     ],
-    dispatch: { status: "out_for_delivery", trackingUrl: "https://track.porter.in/seed_order_02" },
+    dispatch: { status: "out_for_delivery", trackingUrl: "https://shiprocket.co/tracking/seed_order_02" },
   },
   {
     marker: "seed_order_03",
@@ -570,7 +571,7 @@ const orderSeeds = [
       { status: "PACKED", hoursAgo: 40, message: "Status changed to PACKED" },
       { status: "SHIPPED", hoursAgo: 20, message: "Status changed to SHIPPED" },
     ],
-    dispatch: { status: "in_transit", trackingUrl: "https://track.porter.in/seed_order_06" },
+    dispatch: { status: "in_transit", trackingUrl: "https://shiprocket.co/tracking/seed_order_06" },
   },
   {
     marker: "seed_order_07",
@@ -599,7 +600,7 @@ const orderSeeds = [
       { status: "OUT_FOR_DELIVERY", hoursAgo: 150, message: "Status changed to OUT_FOR_DELIVERY" },
       { status: "DELIVERED", hoursAgo: 146, message: "Status changed to DELIVERED" },
     ],
-    dispatch: { status: "delivered", trackingUrl: "https://track.porter.in/seed_order_07" },
+    dispatch: { status: "delivered", trackingUrl: "https://shiprocket.co/tracking/seed_order_07" },
   },
   {
     marker: "seed_order_08",
@@ -656,7 +657,7 @@ const orderSeeds = [
       { status: "OUT_FOR_DELIVERY", hoursAgo: 200, message: "Status changed to OUT_FOR_DELIVERY" },
       { status: "DELIVERED", hoursAgo: 196, message: "Status changed to DELIVERED" },
     ],
-    dispatch: { status: "delivered", trackingUrl: "https://track.porter.in/seed_order_09" },
+    dispatch: { status: "delivered", trackingUrl: "https://shiprocket.co/tracking/seed_order_09" },
   },
 ];
 
@@ -748,9 +749,13 @@ async function main() {
         bikeLabel: seed.bikeLabel,
         razorpayOrderId: seed.marker,
         razorpayPaymentId: seed.paymentStatus === "PAID" ? `${seed.marker}_pay` : null,
-        porterOrderId: seed.dispatch ? `${seed.marker}_porter` : null,
-        porterStatus: seed.dispatch?.status ?? null,
-        porterTrackingUrl: seed.dispatch?.trackingUrl ?? null,
+        shippingProvider: seed.dispatch ? "SHIPROCKET" : null,
+        shippingOrderId: seed.dispatch ? `${seed.marker}_order` : null,
+        shippingShipmentId: seed.dispatch ? `${seed.marker}_shipment` : null,
+        shippingAwbCode: seed.dispatch ? `${seed.marker}_awb` : null,
+        shippingCourierName: seed.dispatch ? "Delhivery" : null,
+        shippingStatus: seed.dispatch?.status ?? null,
+        shippingTrackingUrl: seed.dispatch?.trackingUrl ?? null,
         createdAt: hoursAgo(seed.placedHoursAgo),
         items: { create: items },
         events: {

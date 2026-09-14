@@ -75,10 +75,14 @@ per `lib/security/production-config.ts`):
   PostgreSQL fallback. Partially set is flagged as a warning by
   `pnpm security:check` (fix it or clear it entirely — don't leave it half
   configured).
-- Porter (`PORTER_API_KEY`, `PORTER_API_BASE_URL`, `PORTER_ENV`, warehouse
-  address vars) — delivery dispatch. `PORTER_ENV=production` plus a
-  non-UAT `PORTER_API_BASE_URL` and complete warehouse vars are required
-  *if* you dispatch real deliveries through Porter.
+- Shipping (`SHIPPING_PROVIDER`, `SHIPROCKET_EMAIL`, `SHIPROCKET_PASSWORD`,
+  `SHIPROCKET_PICKUP_LOCATION`, warehouse address vars) — shipment creation
+  through the generic shipping service (`lib/shipping/`), Shiprocket is the
+  active provider. `SHIPROCKET_PICKUP_LOCATION` must exactly match a pickup
+  location already configured in the Shiprocket dashboard. Legacy
+  `PORTER_*` vars are only needed if the deployment still has historical
+  Porter-provider shipments to track/cancel (see `lib/porter.ts`) — never
+  set them up for a new deployment.
 - `NEXT_PUBLIC_POSTHOG_KEY` / `NEXT_PUBLIC_POSTHOG_HOST` — product analytics.
 - `SENTRY_DSN` — not currently wired up; see "Monitoring" below before
   adding it.
@@ -140,14 +144,14 @@ Meilisearch is absent.
 ## Reconciliation jobs
 
 Three read-only reports, safe to run repeatedly and on a schedule — none of
-them mutate state or retry a payment/delivery automatically (a stuck refund
-or uncertain Porter dispatch needs a human to look before anything retries
-real money or a real pickup):
+them mutate state or retry a payment/shipment automatically (a stuck refund
+or uncertain shipment creation/AWB/pickup/cancellation needs a human to look
+before anything retries real money or a real shipment):
 
 | Command | Reports on | Exit code |
 |---|---|---|
 | `pnpm reconcile:payments` | Refunds stuck in `PROCESSING` | non-zero if any candidates found |
-| `pnpm reconcile:porter` | Porter dispatches in an uncertain state | non-zero if any candidates found |
+| `pnpm reconcile:shipping` | Forward/return/partial-return shipments in an uncertain state (Shiprocket), plus any legacy Porter-provider candidates | non-zero if any candidates found |
 | `pnpm reconcile:search` | Listings where `searchSynced=false` (only meaningful if Meilisearch is configured) | non-zero if any remain unsynced after retrying |
 
 `reconcile:search` is the one exception that *does* act — it retries syncing
@@ -164,7 +168,7 @@ with cron (or your platform's scheduled-task equivalent):
 # Every 15 minutes: alert (via cron's mail-on-error, or redirect to your
 # log aggregator) if anything needs a human look.
 */15 * * * * cd /path/to/app && pnpm reconcile:payments >> /var/log/bikeparts/reconcile-payments.log 2>&1
-*/15 * * * * cd /path/to/app && pnpm reconcile:porter  >> /var/log/bikeparts/reconcile-porter.log 2>&1
+*/15 * * * * cd /path/to/app && pnpm reconcile:shipping >> /var/log/bikeparts/reconcile-shipping.log 2>&1
 
 # Every 15 minutes: self-heals a temporary Meilisearch outage. Skip this
 # line entirely if you don't run Meilisearch.
@@ -203,10 +207,10 @@ forward-only by convention here). To roll back a bad release:
 
 ## Monitoring & error handling
 
-- Payment, webhook, Redis, database, Porter, search-sync, and R2 storage
+- Payment, webhook, Redis, database, shipping, search-sync, and R2 storage
   failures are all logged server-side with a `[subsystem]` prefix (grep your
   process logs for `console.error` output tagged `[checkout]`, `[webhook]`,
-  `[security]`, `[product-images]`, `[search]`, etc.) — pipe stdout/stderr to
+  `[security]`, `[product-images]`, `[search]`, `[shipping]`, etc.) — pipe stdout/stderr to
   whatever your host aggregates (journald, Docker logs, a hosted log
   service).
 - User-facing errors are deliberately generic (e.g. "Payment signature
@@ -229,7 +233,7 @@ forward-only by convention here). To roll back a bad release:
 | Search 500s or times out | Meilisearch down and misconfigured DB fallback | Confirm PostgreSQL is reachable — the fallback needs it too |
 | Checkout succeeds but payment never confirms | Razorpay webhook not configured, or `RAZORPAY_WEBHOOK_SECRET` mismatch | Razorpay dashboard webhook delivery log; `[webhook][razorpay]` in server logs |
 | Refund stuck, never completes | Razorpay API call failed/timed out mid-flight | `pnpm reconcile:payments` |
-| Porter dispatch stuck | Porter API call outcome uncertain | `pnpm reconcile:porter` |
+| Shipment creation/AWB/pickup/cancellation stuck | Shiprocket API call outcome uncertain | `pnpm reconcile:shipping` |
 | Product image upload fails | R2 credentials wrong/missing in production (fails closed, no local-disk fallback) | `[product-images]` in server logs; `pnpm security:check` |
 | Everyone logged out of `/admin` unexpectedly | `ADMIN_SESSION_VERSION` was bumped (intentional revocation) or `ADMIN_SESSION_SECRET` changed | Check recent env changes |
 
@@ -243,7 +247,9 @@ pnpm test:checkout-inventory
 pnpm test:checkout-payment-race
 pnpm test:order-refund-state
 pnpm test:webhook-lifecycle
-pnpm test:porter-state
+pnpm test:shipping-state
+pnpm test:order-return-state
+pnpm test:order-returns-partial
 pnpm test:addresses
 pnpm test:product-image-storage
 pnpm test:product-image-storage-prod

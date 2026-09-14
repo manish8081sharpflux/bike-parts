@@ -42,9 +42,10 @@ outside the repo checkout.
 ### What's in the dump
 
 Every table in `prisma/schema.prisma` — customers, addresses, orders,
-listings, webhook/refund/Porter state, admin-managed product data. A restore
-brings back the exact state at dump time, including in-flight orders and
-stock reservations.
+listings, webhook/refund/shipping state (including historical Porter-provider
+shipments, distinguished from Shiprocket ones via `shippingProvider`),
+admin-managed product data. A restore brings back the exact state at dump
+time, including in-flight orders and stock reservations.
 
 ## 2. Restore
 

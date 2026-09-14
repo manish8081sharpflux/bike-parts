@@ -125,8 +125,11 @@ export type PartialReturn = {
   approvedAt: number | null;
   receivedAt: number | null;
   condition: "RESELLABLE" | "DAMAGED" | null;
-  porterStatus: string | null;
-  porterTrackingUrl: string | null;
+  shippingProvider: "PORTER" | "SHIPROCKET" | null;
+  shippingStatus: string | null;
+  shippingTrackingUrl: string | null;
+  shippingAwbCode: string | null;
+  shippingCourierName: string | null;
   refundStatus: PartialRefundStatus;
   refundAmount: number | null;
   refundProcessedAt: number | null;
@@ -152,6 +155,12 @@ export type Order = {
   events?: OrderEventEntry[];
   /** Whether this order was actually paid for — a refund only ever makes sense against a paid order. */
   isPaid: boolean;
+  /** Real, provider-backed forward-shipment info — "PORTER" only ever appears on historical orders dispatched before the Shiprocket migration (see the Prisma ShippingProvider enum). Used to decide whether to show real tracking info instead of the demo rider/map (see OrderComponents.tsx). */
+  shippingProvider: "PORTER" | "SHIPROCKET" | null;
+  shippingStatus: string | null;
+  shippingTrackingUrl: string | null;
+  shippingAwbCode: string | null;
+  shippingCourierName: string | null;
   refundStatus: RefundStatus;
   refundReason: string | null;
   refundAdminNote: string | null;
@@ -162,7 +171,10 @@ export type Order = {
   returnReason: string | null;
   returnAdminNote: string | null;
   returnRequestedAt: number | null;
-  returnPorterTrackingUrl: string | null;
+  returnShippingProvider: "PORTER" | "SHIPROCKET" | null;
+  returnShippingTrackingUrl: string | null;
+  returnShippingAwbCode: string | null;
+  returnShippingCourierName: string | null;
   returnReceivedAt: number | null;
   /** Item/quantity-level returns — independent of returnStatus above, each with its own lifecycle. See OrderReturn in the DB. */
   partialReturns: PartialReturn[];

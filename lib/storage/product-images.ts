@@ -112,7 +112,17 @@ function resolveBackend(): StorageBackend {
 
 /** Reads and validates one uploaded file, then stores it. Returns null if the field was left empty. */
 export async function uploadProductImage(file: FormDataEntryValue | null): Promise<UploadedImage | null> {
-  if (!(file instanceof File) || !file.name) {
+  // An untouched <input type="file"> submits as an empty File — but this
+  // Next.js version's Server Action form encoding (see AGENTS.md's warning
+  // that this isn't stock Next.js behavior) normalizes it to a zero-byte
+  // File named "blob" instead of the classic empty-string name, so a
+  // name-only check no longer distinguishes "nothing selected" from a real
+  // upload. Only that exact placeholder shape is treated as empty — a
+  // genuinely selected 0-byte file under any other name still falls through
+  // to validateImageUpload below and surfaces as a real error, since an
+  // admin who deliberately picked a broken file should be told, not
+  // silently ignored.
+  if (!(file instanceof File) || !file.name || (file.name === "blob" && file.size === 0)) {
     return null;
   }
 

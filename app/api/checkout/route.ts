@@ -72,7 +72,7 @@ export async function POST(request: Request) {
   // Snapshot the address fields onto the order now, immutably — see
   // Order.deliveryAddress. Orders never read the live Address row again
   // after this, so editing or deleting the saved address later cannot
-  // change an already-placed order or what Porter dispatches with.
+  // change an already-placed order or what the shipment gets created with.
   const deliveryAddressSnapshot = {
     sourceAddressId: savedAddress.id,
     label: savedAddress.label,

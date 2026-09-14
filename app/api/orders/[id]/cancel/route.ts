@@ -25,7 +25,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: "Order not found." }, { status: 404 });
   }
 
-  if (!(["PENDING", "PAID"] as const).includes(order.status as "PENDING" | "PAID") || order.porterOrderId) {
+  if (!(["PENDING", "PAID"] as const).includes(order.status as "PENDING" | "PAID") || order.shippingOrderId) {
     return NextResponse.json({ error: "This order can no longer be cancelled after fulfillment has started." }, { status: 409 });
   }
 

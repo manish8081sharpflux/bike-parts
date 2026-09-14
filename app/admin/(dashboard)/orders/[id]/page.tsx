@@ -6,6 +6,7 @@ import { formatInr } from "@/lib/format";
 import {
   approveRefundAction,
   approveReturnAction,
+  cancelShipmentAction,
   dispatchOrderAction,
   dispatchReturnPickupAction,
   markReturnReceivedAction,
@@ -18,6 +19,7 @@ import {
 import { RefundReadyPopup } from "./RefundReadyPopup";
 import { ActivityLog } from "./ActivityLog";
 import { PartialReturnsSection } from "./PartialReturnsSection";
+import { ShipmentDispatchForm } from "./ShipmentDispatchForm";
 
 export const dynamic = "force-dynamic";
 
@@ -87,6 +89,7 @@ export default async function AdminOrderDetailPage({
   const boundDispatchReturnPickup = dispatchReturnPickupAction.bind(null, order.id);
   const boundRefreshReturnPickup = refreshReturnPickupStatusAction.bind(null, order.id);
   const boundMarkReturnReceived = markReturnReceivedAction.bind(null, order.id);
+  const boundCancelShipment = cancelShipmentAction.bind(null, order.id);
 
   return (
     <div className="flex flex-col gap-4">
@@ -262,44 +265,46 @@ export default async function AdminOrderDetailPage({
                   </form>
                 </div>
               ) : order.returnStatus === "APPROVED" ? (
-                order.returnPorterReconciliationRequired ? (
+                order.returnShippingReconciliationRequired ? (
                   <div className="mt-3 rounded-lg bg-amber-50 px-4 py-3 text-xs font-medium text-amber-800">
-                    <p className="font-bold">Pickup outcome is uncertain.</p>
-                    <p className="mt-1">Verify the pickup with Porter before dispatching again.</p>
-                    {order.returnPorterLastError ? (
-                      <p className="mt-2 text-[11px] text-amber-700">{order.returnPorterLastError}</p>
+                    <p className="font-bold">Shipment outcome is uncertain.</p>
+                    <p className="mt-1">Verify with the shipping provider before creating another shipment.</p>
+                    {order.returnShippingLastError ? (
+                      <p className="mt-2 text-[11px] text-amber-700">{order.returnShippingLastError}</p>
                     ) : null}
                   </div>
                 ) : (
-                  <form action={boundDispatchReturnPickup} className="mt-3">
-                    <p className="mb-2 text-xs text-zinc-500">
-                      Creates a reverse Porter pickup — the customer&apos;s address becomes the pickup point,
-                      the warehouse the drop.
-                    </p>
-                    <button
-                      type="submit"
-                      className="h-10 w-full rounded-lg bg-[#ff4b1f] text-sm font-bold text-white hover:bg-[#e8330e]"
-                    >
-                      Dispatch pickup with Porter
-                    </button>
-                  </form>
+                  <div className="mt-3">
+                    <ShipmentDispatchForm
+                      action={boundDispatchReturnPickup}
+                      serviceabilityUrl={`/api/admin/orders/${order.id}/return-serviceability`}
+                      submitLabel="Create Return Pickup"
+                      description="Creates a reverse shipment — the customer's address becomes the pickup point, the warehouse the drop."
+                    />
+                  </div>
                 )
               ) : order.returnStatus === "PICKUP_SCHEDULED" || order.returnStatus === "PICKED_UP" ? (
                 <div className="mt-3 flex flex-col gap-2">
-                  {order.returnPorterOrderId && order.returnPorterOrderId !== "DISPATCHING" ? (
+                  {order.returnShippingOrderId && order.returnShippingOrderId !== "CREATING" ? (
                     <p className="text-xs text-zinc-500">
-                      Porter order: <span className="font-mono">{order.returnPorterOrderId}</span> &bull;{" "}
-                      {order.returnPorterStatus ?? "unknown"}
+                      Provider: <span className="font-bold">{order.returnShippingProvider ?? "Shiprocket"}</span> &bull; Courier:{" "}
+                      <span className="font-bold">{order.returnShippingCourierName ?? "unknown"}</span>
+                      {order.returnShippingAwbCode ? (
+                        <>
+                          {" "}
+                          &bull; AWB: <span className="font-mono">{order.returnShippingAwbCode}</span>
+                        </>
+                      ) : null}
                     </p>
                   ) : null}
-                  {order.returnPorterTrackingUrl ? (
+                  {order.returnShippingTrackingUrl ? (
                     <a
-                      href={order.returnPorterTrackingUrl}
+                      href={order.returnShippingTrackingUrl}
                       target="_blank"
                       rel="noreferrer"
                       className="text-xs font-bold text-[#ff4b1f]"
                     >
-                      Track pickup ↗
+                      Track Shipment ↗
                     </a>
                   ) : null}
                   <form action={boundRefreshReturnPickup}>
@@ -307,7 +312,7 @@ export default async function AdminOrderDetailPage({
                       type="submit"
                       className="h-9 w-full rounded-lg border border-zinc-200 text-xs font-bold text-zinc-700 hover:bg-zinc-50"
                     >
-                      Refresh pickup status
+                      Refresh Tracking
                     </button>
                   </form>
                   <form action={boundMarkReturnReceived} className="flex flex-col gap-2">
@@ -387,11 +392,15 @@ export default async function AdminOrderDetailPage({
               reason: orderReturn.reason,
               adminNote: orderReturn.adminNote,
               condition: orderReturn.condition,
-              porterOrderId: orderReturn.porterOrderId,
-              porterStatus: orderReturn.porterStatus,
-              porterTrackingUrl: orderReturn.porterTrackingUrl,
-              porterReconciliationRequired: orderReturn.porterReconciliationRequired,
-              porterLastError: orderReturn.porterLastError,
+              shippingProvider: orderReturn.shippingProvider,
+              shippingOrderId: orderReturn.shippingOrderId,
+              shippingShipmentId: orderReturn.shippingShipmentId,
+              shippingAwbCode: orderReturn.shippingAwbCode,
+              shippingCourierName: orderReturn.shippingCourierName,
+              shippingStatus: orderReturn.shippingStatus,
+              shippingTrackingUrl: orderReturn.shippingTrackingUrl,
+              shippingReconciliationRequired: orderReturn.shippingReconciliationRequired,
+              shippingLastError: orderReturn.shippingLastError,
               refundStatus: orderReturn.refundStatus,
               refundAmount: orderReturn.refundAmount === null ? null : Number(orderReturn.refundAmount),
               refundFailureReason: orderReturn.refundFailureReason,
@@ -542,24 +551,40 @@ export default async function AdminOrderDetailPage({
           </div>
 
           <div className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-zinc-100">
-            <h2 className="text-base font-black">Delivery (Porter)</h2>
+            <h2 className="text-base font-black">Shipping</h2>
 
-            {order.porterOrderId ? (
+            {order.shippingReconciliationRequired ? (
+              <div className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
+                <p className="font-bold">Shipment outcome is uncertain.</p>
+                <p className="mt-1">Verify with the shipping provider before retrying.</p>
+                {order.shippingLastError ? <p className="mt-2 text-[11px] text-amber-700">{order.shippingLastError}</p> : null}
+              </div>
+            ) : order.shippingOrderId && order.shippingOrderId !== "CREATING" ? (
               <div className="mt-2 flex flex-col gap-1 text-sm">
                 <p>
-                  Porter order: <span className="font-mono text-xs">{order.porterOrderId}</span>
+                  Provider: <span className="font-bold">{order.shippingProvider ?? "Shiprocket"}</span>
                 </p>
+                {order.shippingCourierName ? (
+                  <p>
+                    Courier: <span className="font-bold">{order.shippingCourierName}</span>
+                  </p>
+                ) : null}
+                {order.shippingAwbCode ? (
+                  <p>
+                    AWB: <span className="font-mono text-xs">{order.shippingAwbCode}</span>
+                  </p>
+                ) : null}
                 <p>
-                  Status: <span className="font-bold">{order.porterStatus ?? "unknown"}</span>
+                  Status: <span className="font-bold">{order.shippingStatus ?? "unknown"}</span>
                 </p>
-                {order.porterTrackingUrl ? (
+                {order.shippingTrackingUrl ? (
                   <a
-                    href={order.porterTrackingUrl}
+                    href={order.shippingTrackingUrl}
                     target="_blank"
                     rel="noreferrer"
                     className="text-xs font-bold text-[#ff4b1f]"
                   >
-                    Track shipment ↗
+                    Track Shipment ↗
                   </a>
                 ) : null}
 
@@ -568,24 +593,29 @@ export default async function AdminOrderDetailPage({
                     type="submit"
                     className="h-9 w-full rounded-lg border border-zinc-200 text-xs font-bold text-zinc-700 hover:bg-zinc-50"
                   >
-                    Refresh delivery status
+                    Refresh Tracking
                   </button>
                 </form>
+                {order.status !== "DELIVERED" && order.status !== "CANCELLED" ? (
+                  <form action={boundCancelShipment}>
+                    <button
+                      type="submit"
+                      className="h-9 w-full rounded-lg border border-red-200 text-xs font-bold text-red-700 hover:bg-red-50"
+                    >
+                      Cancel Shipment
+                    </button>
+                  </form>
+                ) : null}
               </div>
             ) : (
-              <form action={boundDispatch} className="mt-3">
-                <p className="mb-2 text-xs text-zinc-500">
-                  Creates a Porter delivery order for this shipment. The order must be paid
-                  first.
-                </p>
-                <button
-                  type="submit"
-                  disabled={order.paymentStatus !== "PAID"}
-                  className="h-10 w-full rounded-lg bg-[#ff4b1f] text-sm font-bold text-white transition hover:bg-[#e8330e] disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  Dispatch with Porter
-                </button>
-              </form>
+              <div className="mt-3">
+                <ShipmentDispatchForm
+                  action={boundDispatch}
+                  serviceabilityUrl={`/api/admin/orders/${order.id}/dispatch-serviceability`}
+                  submitLabel="Create Shipment"
+                  description="Creates a shipment with the shipping provider. The order must be paid first."
+                />
+              </div>
             )}
           </div>
         </div>

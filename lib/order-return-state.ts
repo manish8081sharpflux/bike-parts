@@ -1,6 +1,7 @@
-import { Prisma } from "@prisma/client";
+import { Prisma, type ShippingProvider } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { requestRefund } from "@/lib/order-refund-state";
+import { isShiprocketReversePickedUp } from "@/lib/shipping/status-mapping";
 
 export type ReturnRequestResult = "requested" | "already_requested" | "not_returnable";
 
@@ -9,6 +10,11 @@ export type ReturnRequestResult = "requested" | "already_requested" | "not_retur
  * actually been delivered — for anything still in flight, cancellation
  * (see order-delivery-state.ts) is the right action, not a return.
  * REJECTED can be requested again, same as the refund flow it feeds into.
+ *
+ * This whole-order flow is legacy — see the ReturnStatus doc comment in
+ * schema.prisma. New return requests should go through
+ * lib/order-returns/service.ts (item/quantity-level); this module is kept
+ * only so pre-existing in-flight whole-order returns can finish.
  */
 export async function requestReturn(orderId: string, reason: string): Promise<ReturnRequestResult> {
   return prisma.$transaction(async (tx) => {
@@ -67,46 +73,61 @@ export async function rejectReturn(orderId: string, adminNote: string) {
 }
 
 /**
- * Atomically claims an approved return for reverse-pickup dispatch, mirroring
- * claimPorterDispatch's "DISPATCHING" placeholder pattern (see
- * order-delivery-state.ts) so a double-click can't create two Porter orders
- * for the same return. Also blocked while a prior attempt's outcome is
- * still uncertain (returnPorterOrderId stays "DISPATCHING" in that case —
- * see failReturnPickupDispatch) so a retry can never race a pickup that may
- * have already been created on Porter's side.
+ * Atomically claims an approved return for reverse-shipment creation,
+ * mirroring claimShippingDispatch's "CREATING" placeholder pattern (see
+ * order-delivery-state.ts) so a double-click can't create two shipments for
+ * the same return. Also blocked while a prior attempt's outcome is still
+ * uncertain (returnShippingOrderId stays "CREATING" in that case — see
+ * failReturnShippingDispatch) so a retry can never race a shipment that may
+ * have already been created on the provider's side.
  */
-export async function claimReturnPickupDispatch(orderId: string) {
+export async function claimReturnShippingDispatch(orderId: string) {
   const claim = await prisma.order.updateMany({
-    where: { id: orderId, returnStatus: "APPROVED", returnPorterOrderId: null },
+    where: { id: orderId, returnStatus: "APPROVED", returnShippingOrderId: null },
     data: {
-      returnPorterOrderId: "DISPATCHING",
-      returnPorterAttemptedAt: new Date(),
-      returnPorterReconciliationRequired: false,
-      returnPorterLastError: null,
+      returnShippingOrderId: "CREATING",
+      returnShippingAttemptedAt: new Date(),
+      returnShippingReconciliationRequired: false,
+      returnShippingLastError: null,
     },
   });
   return claim.count === 1;
 }
 
-export async function completeReturnPickupDispatch(
-  orderId: string,
-  result: { porterOrderId: string; status: string; trackingUrl: string | null }
-) {
+export type ReturnShipmentResult = {
+  provider: ShippingProvider;
+  shippingOrderId: string;
+  shippingShipmentId: string | null;
+  awbCode: string | null;
+  courierName: string | null;
+  status: string;
+  trackingUrl: string | null;
+};
+
+export async function completeReturnShippingDispatch(orderId: string, result: ReturnShipmentResult) {
   return prisma.$transaction(async (tx) => {
     const completed = await tx.order.updateMany({
-      where: { id: orderId, returnPorterOrderId: "DISPATCHING" },
+      where: { id: orderId, returnShippingOrderId: "CREATING" },
       data: {
         returnStatus: "PICKUP_SCHEDULED",
-        returnPorterOrderId: result.porterOrderId,
-        returnPorterStatus: result.status,
-        returnPorterTrackingUrl: result.trackingUrl,
-        returnPorterReconciliationRequired: false,
-        returnPorterLastError: null,
+        returnShippingProvider: result.provider,
+        returnShippingOrderId: result.shippingOrderId,
+        returnShippingShipmentId: result.shippingShipmentId,
+        returnShippingAwbCode: result.awbCode,
+        returnShippingCourierName: result.courierName,
+        returnShippingStatus: result.status,
+        returnShippingTrackingUrl: result.trackingUrl,
+        returnShippingReconciliationRequired: false,
+        returnShippingLastError: null,
       },
     });
     if (completed.count !== 1) return false;
     await tx.orderEvent.create({
-      data: { orderId, type: "RETURN_PICKUP_DISPATCHED", message: `Return pickup dispatched via Porter (order ${result.porterOrderId})` },
+      data: {
+        orderId,
+        type: "RETURN_SHIPMENT_CREATED",
+        message: `Return shipment created via ${result.provider} (order ${result.shippingOrderId}${result.awbCode ? `, AWB ${result.awbCode}` : ""})`,
+      },
     });
     return true;
   });
@@ -114,53 +135,50 @@ export async function completeReturnPickupDispatch(
 
 /**
  * Mirrors dispatchOrderAction's exact definite-vs-uncertain split for the
- * forward delivery (see admin-orders.ts), applied to the reverse pickup:
+ * forward shipment (see admin-orders.ts), applied to the reverse shipment:
  *
- * - Definite failure (Porter clearly rejected the request before creating a
- *   pickup): clear the claim so dispatch can be retried, and record why.
+ * - Definite failure (the provider clearly rejected the request before
+ *   creating anything): clear the claim so it can be retried, and record why.
  * - Uncertain failure (timeout/ECONNRESET/socket interruption, or a
- *   response missing a Porter order id — the pickup may have actually been
- *   created): do NOT clear the claim. returnPorterOrderId stays
- *   "DISPATCHING" (blocking claimReturnPickupDispatch's WHERE clause from
- *   ever matching again) and returnPorterReconciliationRequired is set so
- *   an operator has to verify with Porter directly before anything can be
+ *   response missing a shipment id — the shipment may have actually been
+ *   created): do NOT clear the claim. returnShippingOrderId stays "CREATING"
+ *   (blocking claimReturnShippingDispatch's WHERE clause from ever matching
+ *   again) and returnShippingReconciliationRequired is set so an operator
+ *   has to verify with the provider directly before anything can be
  *   retried — never automatic.
  */
-export async function failReturnPickupDispatch(orderId: string, failureMessage: string, uncertain: boolean) {
+export async function failReturnShippingDispatch(orderId: string, failureMessage: string, uncertain: boolean) {
   await prisma.$transaction(async (tx) => {
     if (uncertain) {
       await tx.order.updateMany({
-        where: { id: orderId, returnPorterOrderId: "DISPATCHING" },
+        where: { id: orderId, returnShippingOrderId: "CREATING" },
         data: {
-          returnPorterStatus: "RECONCILIATION_REQUIRED",
-          returnPorterReconciliationRequired: true,
-          returnPorterLastError: failureMessage,
+          returnShippingStatus: "RECONCILIATION_REQUIRED",
+          returnShippingReconciliationRequired: true,
+          returnShippingLastError: failureMessage,
         },
       });
       await tx.orderEvent.create({
-        data: { orderId, type: "RETURN_PICKUP_RECONCILIATION_REQUIRED", message: failureMessage },
+        data: { orderId, type: "RETURN_SHIPMENT_RECONCILIATION_REQUIRED", message: failureMessage },
       });
     } else {
       await tx.order.updateMany({
-        where: { id: orderId, returnPorterOrderId: "DISPATCHING" },
-        data: { returnPorterOrderId: null, returnPorterStatus: null, returnPorterLastError: failureMessage },
+        where: { id: orderId, returnShippingOrderId: "CREATING" },
+        data: { returnShippingOrderId: null, returnShippingStatus: null, returnShippingLastError: failureMessage },
       });
       await tx.orderEvent.create({
-        data: { orderId, type: "RETURN_PICKUP_DISPATCH_FAILED", message: failureMessage },
+        data: { orderId, type: "RETURN_SHIPMENT_CREATE_FAILED", message: failureMessage },
       });
     }
   });
 }
 
-/** Applies a raw Porter status string for the reverse-pickup shipment — moves PICKUP_SCHEDULED to PICKED_UP once Porter reports the item collected/delivered (back to the warehouse). */
-export async function applyReturnPorterStatus(orderId: string, rawStatus: string) {
+/** Applies a raw shipping-provider status string for the reverse shipment — moves PICKUP_SCHEDULED to PICKED_UP once the provider reports the item collected from the customer. */
+export async function applyReturnShippingStatus(orderId: string, rawStatus: string) {
   return prisma.$transaction(async (tx) => {
-    await tx.order.update({ where: { id: orderId }, data: { returnPorterStatus: rawStatus } });
+    await tx.order.update({ where: { id: orderId }, data: { returnShippingStatus: rawStatus } });
 
-    const value = rawStatus.toLowerCase().trim();
-    const isPickedUp =
-      value.includes("delivered") || value.includes("completed") || value.includes("complete");
-    if (!isPickedUp) return { transitioned: false };
+    if (!isShiprocketReversePickedUp(rawStatus)) return { transitioned: false };
 
     const transitioned = await tx.order.updateMany({
       where: { id: orderId, returnStatus: "PICKUP_SCHEDULED" },
@@ -168,7 +186,7 @@ export async function applyReturnPorterStatus(orderId: string, rawStatus: string
     });
     if (transitioned.count === 1) {
       await tx.orderEvent.create({
-        data: { orderId, type: "RETURN_PICKED_UP", message: `Return picked up (Porter status "${rawStatus}")` },
+        data: { orderId, type: "RETURN_PICKED_UP", message: `Return picked up (shipping status "${rawStatus}")` },
       });
     }
     return { transitioned: transitioned.count === 1 };
@@ -218,9 +236,10 @@ export type ReturnCondition = "RESELLABLE" | "DAMAGED";
 /**
  * Admin confirms the returned item is physically back at the warehouse.
  * Allowed from PICKED_UP (the normal path) or PICKUP_SCHEDULED (a manual
- * fallback for when Porter's tracking doesn't reliably report pickup) —
- * automatically kicks off the existing refund flow so the money side reuses
- * the same tested Razorpay approve/reject code a cancellation refund does.
+ * fallback for when the provider's tracking doesn't reliably report pickup)
+ * — automatically kicks off the existing refund flow so the money side
+ * reuses the same tested Razorpay approve/reject code a cancellation
+ * refund does.
  *
  * `condition` is a required, explicit admin choice — a returned part may be
  * resellable, damaged, opened, or scrap, so stock is never restored
