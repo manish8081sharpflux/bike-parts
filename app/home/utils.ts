@@ -37,16 +37,11 @@ export function formatDeliveryEstimate(min: number | null, max: number | null): 
   return null;
 }
 
-/**
- * Per-card display fields. Rating is the admin's real `product.rating` or
- * null — never a synthetic value; a product with no rating must render
- * without one, not a fake "4.4 ★". `offerLabel` still falls back to a
- * deterministic placeholder when unset (out of scope for this fix — only
- * rating and delivery were reported as showing fabricated data).
- */
+/** Display metadata derived from verified customer reviews and product delivery settings. */
 export function getProductDisplayMeta(products: Product[], product: Product) {
   const productIndex = products.findIndex((item) => item.name === product.name);
-  const rating = product.rating;
+  const rating = product.ratingAverage;
+  const ratingCount = product.ratingCount;
   const deliveryDays = formatDeliveryEstimate(product.deliveryDaysMin, product.deliveryDaysMax);
   const offerLabel =
     product.offerLabel ??
@@ -55,7 +50,7 @@ export function getProductDisplayMeta(products: Product[], product: Product) {
       : productIndex % 3 === 1
       ? "FREE FITMENT CHECK"
       : "OEM QUALITY ASSURED");
-  return { rating, deliveryDays, offerLabel };
+  return { rating, ratingCount, deliveryDays, offerLabel };
 }
 
 

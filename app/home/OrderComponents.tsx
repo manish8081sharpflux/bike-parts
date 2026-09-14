@@ -1,5 +1,7 @@
 "use client";
 
+import { PurchaseReviewEditor } from "./ReviewComponents";
+
 import { useState } from "react";
 import Image from "next/image";
 import { ArrowRight, Banknote, Bike, CheckCircle2, ChevronLeft, ChevronRight, FileText, Gift, HelpCircle, Home as HomeIcon, Loader2, MessageCircle, Package, Phone, RotateCw, Star, Store, Trash2, Zap } from "lucide-react";
@@ -357,6 +359,7 @@ export function DeliveryRouteMap({ rider, order }: { rider: ReturnType<typeof ge
 
 export function OrderDetailView({
   order,
+  onReviewSaved,
   onBack,
   onRequestReturn,
   isRequestingReturn,
@@ -366,6 +369,7 @@ export function OrderDetailView({
   cancelOrderError,
 }: {
   order: Order;
+  onReviewSaved: () => void;
   onBack: () => void;
   /** Submits a return request with the given reason for this order. */
   onRequestReturn: (reason: string) => void;
@@ -713,8 +717,9 @@ export function OrderDetailView({
             </div>
 
             <div className="mt-4 space-y-3">
-              {order.items.map(({ product, quantity }) => (
-                <div key={product.name} className="flex items-center gap-3">
+              {order.items.map(({ product, quantity, orderItemId, canReview, review }) => (
+                <div key={orderItemId ?? product.name}>
+                <div className="flex items-center gap-3">
                   <CheckCircle2 className="size-4 shrink-0 fill-emerald-100 text-emerald-600" />
                   <span className="min-w-0 flex-1 truncate text-sm font-bold text-[#070e2b]">
                     {product.name}
@@ -723,6 +728,8 @@ export function OrderDetailView({
                   <span className="shrink-0 text-sm font-black text-[#070e2b]">
                     &#8377;{formatPrice(parsePrice(product.price) * quantity)}
                   </span>
+                </div>
+                {orderItemId && (canReview || review) ? <PurchaseReviewEditor orderId={order.dbId} orderItemId={orderItemId} productName={product.name} review={review ?? null} onSaved={onReviewSaved} /> : null}
                 </div>
               ))}
             </div>

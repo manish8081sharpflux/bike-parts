@@ -77,6 +77,7 @@ export async function updateOrderStatusAction(orderId: string, formData: FormDat
     }
     revalidatePath(`/admin/orders/${orderId}`);
     revalidatePath("/admin/orders");
+  revalidatePath("/admin/returns");
     revalidatePath("/admin");
     if (result.refundRequested) redirect(`/admin/orders/${orderId}?refundReady=1`);
     return;
@@ -104,6 +105,7 @@ export async function updateOrderStatusAction(orderId: string, formData: FormDat
 
   revalidatePath(`/admin/orders/${orderId}`);
   revalidatePath("/admin/orders");
+  revalidatePath("/admin/returns");
   revalidatePath("/admin");
 
   // Send the admin back to this order with a flag that pops up a modal
@@ -215,6 +217,7 @@ export async function dispatchOrderAction(orderId: string) {
 
   revalidatePath(`/admin/orders/${orderId}`);
   revalidatePath("/admin/orders");
+  revalidatePath("/admin/returns");
   revalidatePath("/admin");
 }
 
@@ -238,6 +241,7 @@ export async function refreshDeliveryStatusAction(orderId: string) {
 
   revalidatePath(`/admin/orders/${orderId}`);
   revalidatePath("/admin/orders");
+  revalidatePath("/admin/returns");
   revalidatePath("/admin");
 }
 
@@ -286,6 +290,7 @@ export async function approveRefundAction(orderId: string, formData: FormData) {
 
   revalidatePath(`/admin/orders/${orderId}`);
   revalidatePath("/admin/orders");
+  revalidatePath("/admin/returns");
   revalidatePath("/admin");
 }
 
@@ -314,6 +319,7 @@ export async function rejectRefundAction(orderId: string, formData: FormData) {
 
   revalidatePath(`/admin/orders/${orderId}`);
   revalidatePath("/admin/orders");
+  revalidatePath("/admin/returns");
   revalidatePath("/admin");
 }
 
@@ -327,6 +333,7 @@ export async function approveReturnAction(orderId: string, formData: FormData) {
 
   revalidatePath(`/admin/orders/${orderId}`);
   revalidatePath("/admin/orders");
+  revalidatePath("/admin/returns");
 }
 
 /** Rejects a pending return request — no pickup happens, just records why for the customer to see. */
@@ -342,6 +349,7 @@ export async function rejectReturnAction(orderId: string, formData: FormData) {
 
   revalidatePath(`/admin/orders/${orderId}`);
   revalidatePath("/admin/orders");
+  revalidatePath("/admin/returns");
 }
 
 /**
@@ -438,6 +446,7 @@ export async function dispatchReturnPickupAction(orderId: string) {
 
   revalidatePath(`/admin/orders/${orderId}`);
   revalidatePath("/admin/orders");
+  revalidatePath("/admin/returns");
 }
 
 /** Polls Porter for the reverse-pickup shipment's latest status and applies it (moving PICKUP_SCHEDULED to PICKED_UP once collected). */
@@ -463,6 +472,7 @@ export async function refreshReturnPickupStatusAction(orderId: string) {
 
   revalidatePath(`/admin/orders/${orderId}`);
   revalidatePath("/admin/orders");
+  revalidatePath("/admin/returns");
 }
 
 /**
@@ -487,5 +497,6 @@ export async function markReturnReceivedAction(orderId: string, formData: FormDa
 
   revalidatePath(`/admin/orders/${orderId}`);
   revalidatePath("/admin/orders");
+  revalidatePath("/admin/returns");
   redirect(`/admin/orders/${orderId}?refundReady=1`);
 }

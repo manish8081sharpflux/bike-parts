@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { ProductReviews } from "./ReviewComponents";
+import { hasCustomerRating } from "@/lib/reviews/types";
 import type { MouseEvent } from "react";
 import Image from "next/image";
 import { ArrowRight, Bike, CheckCircle2, FileText, ListChecks, Minus, Plus, ShoppingCart, Star } from "lucide-react";
@@ -19,7 +21,6 @@ export function ProductCard({
   onIncrement,
   onDecrement,
   compact = false,
-  rating,
   deliveryDays,
   offerLabel,
 }: {
@@ -33,12 +34,11 @@ export function ProductCard({
   onDecrement: () => void;
   compact?: boolean;
   /** Real per-product rating/delivery-window/offer label when set — see getProductDisplayMeta. null/absent means no data; never render a fake value. Unused in compact mode. */
-  rating?: number | null;
   deliveryDays?: string | null;
   offerLabel?: string;
 }) {
   if (!compact) {
-    const hasRating = rating != null;
+    const hasRating = hasCustomerRating(product);
     const hasDelivery = Boolean(deliveryDays);
 
     return (
@@ -117,12 +117,12 @@ export function ProductCard({
 
           {hasRating || hasDelivery ? (
             <div className="mt-1 flex min-w-0 items-center gap-1 text-[10px] font-bold text-zinc-950 sm:gap-1.5 sm:text-xs">
-              {rating != null ? (
+              {hasRating ? (
                 <>
                   <span className="grid size-4 shrink-0 place-items-center rounded-full bg-emerald-600 text-white sm:size-5">
                     <Star className="size-2.5 fill-current sm:size-3" />
                   </span>
-                  <span>{rating.toFixed(1)}</span>
+                  <span>{product.ratingAverage!.toFixed(1)} ({product.ratingCount})</span>
                 </>
               ) : null}
               {hasRating && hasDelivery ? <span className="text-zinc-950">&bull;</span> : null}
@@ -741,6 +741,7 @@ export function ProductDetailDrawer({
             </div>
           </div>
         </div>
+        <ProductReviews key={product.id} listingId={product.id} />
       </div>
     </div>
   );

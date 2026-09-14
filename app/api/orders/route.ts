@@ -2,12 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getCustomerSession } from "@/lib/auth/customer-session";
 
-/**
- * Returns order history for a phone number. The storefront's login is a
- * simple phone-entry (no OTP), so this endpoint trusts the phone number the
- * same way the rest of the app does — it is not a secure per-user API and
- * should not be treated as one once real OTP/auth is added.
- */
+/** Customer order history, scoped to the authenticated customer session. */
 export async function GET() {
   const session = await getCustomerSession();
   if (!session) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
@@ -16,7 +11,10 @@ export async function GET() {
     where: { buyerId: session.user.id },
     orderBy: { createdAt: "desc" },
     include: {
-      items: true,
+      items: { include: { productReviews: {
+        where: { userId: session.user.id },
+        select: { id: true, rating: true, reviewText: true, createdAt: true, updatedAt: true },
+      } } },
       // Oldest first — the client uses this to find *when* each stage was
       // first reached for the tracking stepper's timestamps, real data
       // instead of guessed fixed offsets from placedAt.
@@ -53,6 +51,10 @@ export async function GET() {
       returnPorterTrackingUrl: order.returnPorterTrackingUrl,
       returnReceivedAt: order.returnReceivedAt ? order.returnReceivedAt.getTime() : null,
       items: order.items.map((item) => ({
+        id: item.id,
+        listingId: item.listingId,
+        canReview: order.status === "DELIVERED" && item.listingId !== null && !item.productReviews.length,
+        review: item.productReviews[0] ?? null,
         name: item.productName,
         image: item.productImage,
         quantity: item.quantity,

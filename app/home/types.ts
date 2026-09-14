@@ -49,7 +49,7 @@ declare global {
 }
 
 
-export type CartLine = { product: Product; quantity: number };
+export type CartLine = { product: Product; quantity: number; orderItemId?: string; listingId?: string | null; canReview?: boolean; review?: import("@/lib/reviews/types").CustomerReview | null };
 
 
 export type Address = {

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
+import { compareProductRatings } from "@/lib/reviews/types";
 import { Bike, Calendar, ChevronDown, Filter, Package, Search, SlidersHorizontal } from "lucide-react";
 import type { Product } from "@/lib/storefront-catalog";
 import { SUBCATEGORIES_BY_CATEGORY } from "@/lib/product-subcategories";
@@ -147,9 +148,7 @@ export function CatalogView({
     if (sortOption === "price-asc") return parsePrice(a.price) - parsePrice(b.price);
     if (sortOption === "price-desc") return parsePrice(b.price) - parsePrice(a.price);
     if (sortOption === "rating-desc")
-      // Unrated products (rating null) sort after rated ones instead of
-      // comparing against a fake number.
-      return (getProductDisplayMeta(products, b).rating ?? 0) - (getProductDisplayMeta(products, a).rating ?? 0);
+      return compareProductRatings(a, b);
     return 0;
   });
   const title = activeCategory
@@ -594,7 +593,6 @@ export function CatalogView({
                   onAddToCart={() => onAddToCart(product, 1)}
                   onIncrement={() => onIncrementCartItem(product.name)}
                   onDecrement={() => onDecrementCartItem(product.name)}
-                  rating={meta.rating}
                   deliveryDays={meta.deliveryDays}
                   offerLabel={meta.offerLabel}
                 />

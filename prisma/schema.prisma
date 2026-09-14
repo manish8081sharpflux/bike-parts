@@ -111,6 +111,7 @@ model User {
   orders       Order[]
   customerSessions CustomerSession[]
   addresses    Address[]
+  productReviews ProductReview[]
 }
 
 // Customer-owned delivery address book. Orders never read this table live —
@@ -204,6 +205,7 @@ model BikePartListing {
   weightKg         Decimal?         @db.Decimal(6, 3)
   warrantyMonths   Int?
   countryOfOrigin  String?
+  // Deprecated: historical manual value. Customer ratings come only from ProductReview.
   rating           Decimal?         @db.Decimal(2, 1)
   deliveryDaysMin  Int?
   deliveryDaysMax  Int?
@@ -215,6 +217,7 @@ model BikePartListing {
   updatedAt        DateTime         @updatedAt
   seller           SellerProfile?   @relation(fields: [sellerId], references: [id], onDelete: SetNull)
   orderItems       OrderItem[]
+  productReviews   ProductReview[]
 
   @@index([category])
   @@index([brand])
@@ -296,6 +299,7 @@ model Order {
   buyer             User?         @relation(fields: [buyerId], references: [id])
   items             OrderItem[]
   events            OrderEvent[]
+  productReviews    ProductReview[]
 
   @@index([status])
   @@index([customerPhone])
@@ -319,6 +323,29 @@ model OrderItem {
   unitPrice         Decimal          @db.Decimal(10, 2)
   order             Order            @relation(fields: [orderId], references: [id], onDelete: Cascade)
   listing           BikePartListing? @relation(fields: [listingId], references: [id], onDelete: SetNull)
+  productReviews    ProductReview[]
+}
+
+model ProductReview {
+  id          String   @id @default(cuid())
+  listingId   String
+  userId      String
+  orderId     String
+  orderItemId String
+  rating      Int
+  reviewText  String?  @db.VarChar(2000)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  listing   BikePartListing @relation(fields: [listingId], references: [id], onDelete: Restrict)
+  user      User            @relation(fields: [userId], references: [id], onDelete: Restrict)
+  order     Order           @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  orderItem OrderItem       @relation(fields: [orderItemId], references: [id], onDelete: Restrict)
+
+  @@unique([userId, orderItemId])
+  @@index([listingId, createdAt, id])
+  @@index([orderId])
+  @@index([orderItemId])
 }
 
 // Live remaining stock for the storefront's static product catalog (see

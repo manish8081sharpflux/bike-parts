@@ -27,7 +27,8 @@ function product(overrides = {}) {
     weightKg: null,
     warrantyMonths: null,
     countryOfOrigin: null,
-    rating: null,
+    ratingAverage: null,
+    ratingCount: 0,
     deliveryDaysMin: null,
     deliveryDaysMax: null,
     offerLabel: null,
@@ -83,24 +84,24 @@ test("delivery: neither set returns null — never a fabricated fallback like '2
 
 // --- Part C: no synthetic ratings ---
 
-test("rating: a real product.rating is returned as-is", () => {
-  const products = [product({ name: "A", rating: 4.5 })];
+test("ratingAverage: a real product.ratingAverage is returned as-is", () => {
+  const products = [product({ name: "A", ratingAverage: 4.5, ratingCount: 2 })];
   assert.equal(getProductDisplayMeta(products, products[0]).rating, 4.5);
 });
 
-test("rating: null product.rating stays null — no synthetic fallback value", () => {
-  const products = [product({ name: "A", rating: null })];
+test("ratingAverage: null product.ratingAverage stays null — no synthetic fallback value", () => {
+  const products = [product({ name: "A", ratingAverage: null })];
   assert.equal(getProductDisplayMeta(products, products[0]).rating, null);
 });
 
-test("rating: no synthetic rating is derived from product index or name length", () => {
+test("ratingAverage: no synthetic rating is derived from product index or name length", () => {
   // Multiple unrated products at different catalog positions and with very
   // different name lengths must ALL come back null — none of the old
   // `4.1 + ((index + name.length) % 5) / 10` style fabrication.
   const products = [
-    product({ name: "A", rating: null }),
-    product({ name: "A Much Longer Product Name Than The First", rating: null }),
-    product({ name: "Zzz", rating: null }),
+    product({ name: "A", ratingAverage: null }),
+    product({ name: "A Much Longer Product Name Than The First", ratingAverage: null }),
+    product({ name: "Zzz", ratingAverage: null }),
   ];
   for (const p of products) {
     assert.equal(getProductDisplayMeta(products, p).rating, null);
@@ -121,7 +122,7 @@ test("delivery estimate is also never fabricated from product index when both fi
 // --- Part D/E: optional fields never produce undefined/NaN artifacts ---
 
 test("getProductDisplayMeta never returns NaN/undefined for rating or deliveryDays on a fully-blank product", () => {
-  const p = product({ rating: null, deliveryDaysMin: null, deliveryDaysMax: null });
+  const p = product({ ratingAverage: null, deliveryDaysMin: null, deliveryDaysMax: null });
   const meta = getProductDisplayMeta([p], p);
   assert.equal(meta.rating, null);
   assert.equal(meta.deliveryDays, null);

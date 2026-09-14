@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, ArrowUpRight, ShoppingBag, Clock3, IndianRupee, Package, RotateCcw, Plus, CircleAlert, Truck, CreditCard, type LucideIcon } from "lucide-react";
+import { ArrowRight, ArrowUpRight, ShoppingBag, Clock3, IndianRupee, Package, RotateCcw, Undo2, Plus, CircleAlert, Truck, CreditCard, type LucideIcon } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { isRazorpayConfigured } from "@/lib/razorpay";
 import { isPorterConfigured } from "@/lib/porter";
@@ -13,13 +13,14 @@ const STATUS_STYLES: Record<string, string> = {
   CANCELLED: "bg-red-50 text-red-600",
 };
 export default async function AdminDashboardPage() {
-  const [orderCount, pendingCount, paidRevenue, recentOrders, lowStockCount, pendingRefundCount] = await Promise.all([
+  const [orderCount, pendingCount, paidRevenue, recentOrders, lowStockCount, pendingRefundCount, pendingReturnCount] = await Promise.all([
     prisma.order.count(),
     prisma.order.count({ where: { status: { in: ["PENDING", "PAID", "PACKED"] } } }),
     prisma.order.aggregate({ where: { paymentStatus: "PAID" }, _sum: { amount: true } }),
     prisma.order.findMany({ orderBy: { createdAt: "desc" }, take: 8, include: { items: true } }),
     prisma.bikePartListing.count({ where: { stock: { lte: 5 }, status: "ACTIVE" } }),
     prisma.order.count({ where: { refundStatus: "REQUESTED" } }),
+    prisma.order.count({ where: { returnStatus: "REQUESTED" } }),
   ]);
   const razorpayReady = isRazorpayConfigured();
   const porterReady = isPorterConfigured();
@@ -28,12 +29,13 @@ export default async function AdminDashboardPage() {
       <div><p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-zinc-500">Your store at a glance</p><h1 className="text-3xl font-bold tracking-tight">Dashboard</h1><p className="mt-2 text-sm text-zinc-500">Keep track of orders, revenue, and what needs your attention.</p></div>
       <Link href="/admin/products/new" className="inline-flex items-center gap-2 rounded-xl bg-[#ff4b1f] px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-[#e83b11]"><Plus size={17} aria-hidden="true" />Add product</Link>
     </div>
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
+    <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,220px),1fr))] gap-3">
       <StatCard label="Total orders" value={orderCount.toLocaleString("en-IN")} detail="All-time orders" icon={ShoppingBag} href="/admin/orders" />
       <StatCard label="Active / pending" value={pendingCount.toString()} detail="Pending, paid, or packed" icon={Clock3} href="/admin/orders" />
       <StatCard label="Paid revenue" value={formatInr(paidRevenue._sum.amount ?? 0)} detail="All-time paid orders" icon={IndianRupee} href="/admin/orders?payment=PAID" featured />
       <StatCard label="Low stock" value={lowStockCount.toString()} detail="Active products with 5 or fewer" icon={Package} href="/admin/products" warn={lowStockCount > 0} />
       <StatCard label="Pending refunds" value={pendingRefundCount.toString()} detail={pendingRefundCount ? "Awaiting your review" : "No refunds to review"} icon={RotateCcw} href="/admin/orders?refund=REQUESTED" warn={pendingRefundCount > 0} />
+      <StatCard label="Pending returns" value={pendingReturnCount.toString()} detail={pendingReturnCount ? "Awaiting your review" : "No returns to review"} icon={Undo2} href="/admin/returns?return=REQUESTED" warn={pendingReturnCount > 0} />
     </div>
     {!razorpayReady || !porterReady ? <div className="flex items-start gap-3 rounded-xl border border-amber-200/80 bg-amber-50/70 px-4 py-3.5"><CircleAlert size={18} className="mt-0.5 shrink-0 text-amber-600" aria-hidden="true" /><div className="text-xs leading-relaxed text-amber-900"><p className="font-semibold">Store setup needs attention</p><p className="mt-0.5 text-amber-800">{!porterReady ? "Delivery dispatch is unavailable until Porter is configured. " : ""}{!razorpayReady ? "Online payments are unavailable until Razorpay is configured." : ""}</p></div></div> : null}
     <section className="relative overflow-hidden rounded-2xl border border-zinc-200/80 bg-white shadow-sm">
@@ -48,6 +50,6 @@ export default async function AdminDashboardPage() {
   </div>;
 }
 function StatCard({ label, value, detail, icon: Icon, href, warn, featured }: { label: string; value: string; detail: string; icon: LucideIcon; href: string; warn?: boolean; featured?: boolean }) {
-  return <Link href={href} className={`group rounded-2xl border p-5 shadow-sm transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500 ${featured ? "border-[#24272d] bg-[#24272d] text-white hover:bg-[#30343b]" : "border-zinc-200/80 bg-white hover:border-orange-200"}`}><div className="flex items-center justify-between gap-2"><span className={`text-xs font-medium ${featured ? "text-zinc-300" : "text-zinc-500"}`}>{label}</span><Icon size={17} aria-hidden="true" className={featured ? "text-orange-400" : warn ? "text-amber-500" : "text-zinc-400"} /></div><p className={`mt-5 text-3xl font-semibold tracking-tight tabular-nums ${warn ? "text-amber-600" : ""}`}>{value}</p><p className={`mt-2 text-[10px] ${featured ? "text-zinc-400" : "text-zinc-500"}`}>{detail}</p></Link>;
+  return <Link href={href} className={`group min-w-0 rounded-xl border p-4 shadow-sm transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500 ${featured ? "border-[#24272d] bg-[#24272d] text-white hover:bg-[#30343b]" : "border-zinc-200/80 bg-white hover:border-orange-200"}`}><div className="flex items-center justify-between gap-2"><span className={`text-xs font-medium ${featured ? "text-zinc-300" : "text-zinc-500"}`}>{label}</span><Icon size={17} aria-hidden="true" className={`shrink-0 ${featured ? "text-orange-400" : warn ? "text-amber-500" : "text-zinc-400"}`} /></div><p className={`mt-3 break-words text-2xl font-semibold leading-tight tracking-tight tabular-nums ${warn ? "text-amber-600" : ""}`}>{value}</p><p className={`mt-1 text-xs leading-relaxed ${featured ? "text-zinc-400" : "text-zinc-500"}`}>{detail}</p></Link>;
 }
 

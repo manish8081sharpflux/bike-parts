@@ -1,6 +1,8 @@
 import type { BikePartListing } from "@prisma/client";
 import { safeParseSpecifications, safeParseVehicles, type Specification, type CompatibleVehicle } from "@/lib/products/product-details";
 import { prisma } from "@/lib/db";
+import { getRatingSummaries } from "@/lib/reviews/service";
+import { EMPTY_RATING, type RatingSummary } from "@/lib/reviews/types";
 
 /** Shape the storefront UI (app/home-client.tsx) renders — mapped from a `BikePartListing` DB row. */
 export type Product = {
@@ -28,7 +30,8 @@ export type Product = {
   weightKg: number | null;
   warrantyMonths: number | null;
   countryOfOrigin: string | null;
-  rating: number | null;
+  ratingAverage: number | null;
+  ratingCount: number;
   deliveryDaysMin: number | null;
   deliveryDaysMax: number | null;
   offerLabel: string | null;
@@ -38,7 +41,7 @@ export type Product = {
 const FALLBACK_IMAGE = "/assets/home/part-engine.png";
 
 /** Converts one admin-managed `BikePartListing` row into the shape the storefront renders. */
-export function mapListingToProduct(listing: BikePartListing): Product {
+export function mapListingToProduct(listing: BikePartListing, summary: RatingSummary = EMPTY_RATING): Product {
   return {
     id: listing.id,
     name: listing.name,
@@ -63,7 +66,8 @@ export function mapListingToProduct(listing: BikePartListing): Product {
     weightKg: listing.weightKg !== null ? Number(listing.weightKg) : null,
     warrantyMonths: listing.warrantyMonths,
     countryOfOrigin: listing.countryOfOrigin,
-    rating: listing.rating !== null ? Number(listing.rating) : null,
+    ratingAverage: summary.ratingAverage,
+    ratingCount: summary.ratingCount,
     deliveryDaysMin: listing.deliveryDaysMin,
     deliveryDaysMax: listing.deliveryDaysMax,
     offerLabel: listing.offerLabel,
@@ -77,7 +81,8 @@ export async function getStorefrontProducts(): Promise<Product[]> {
     where: { status: "ACTIVE" },
     orderBy: { createdAt: "desc" },
   });
-  return listings.map(mapListingToProduct);
+  const summaries = await getRatingSummaries(listings.map((listing) => listing.id));
+  return listings.map((listing) => mapListingToProduct(listing, summaries.get(listing.id)));
 }
 
 // Legacy static catalog — no longer what the storefront displays (see

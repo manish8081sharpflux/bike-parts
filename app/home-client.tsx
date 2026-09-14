@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent, MouseEvent, RefObject } from "react";
 import Image from "next/image";
+import { compareProductRatings, type CustomerReview } from "@/lib/reviews/types";
 import Link from "next/link";
 import type { Product } from "@/lib/storefront-catalog";
 import { Apple, ArrowRight, Bike, ChevronDown, ChevronLeft, ChevronRight, Clock, Filter, Loader2, LogOut, MapPin, Package, PackageCheck, Play, Search, Settings, ShoppingCart, Store, User, Wrench, X, Zap } from "lucide-react";
@@ -152,12 +153,7 @@ export function HomeClient({ products }: { products: Product[] }) {
   const bestSellerProducts = useMemo(
     () =>
       [...products]
-        .sort(
-          (a, b) =>
-            // Unrated products (rating null) sort after rated ones instead
-            // of comparing against a fake number.
-            (getProductDisplayMeta(products, b).rating ?? 0) - (getProductDisplayMeta(products, a).rating ?? 0)
-        )
+        .sort(compareProductRatings)
         .slice(0, 10),
     [products]
   );
@@ -1004,7 +1000,7 @@ export function HomeClient({ products }: { products: Product[] }) {
           amount: number;
           porterStatus: string | null;
           deliveryAddress: Partial<Address> | null;
-          items: Array<{ name: string; image: string | null; quantity: number; unitPrice: number }>;
+          items: Array<{ id: string; listingId: string | null; canReview: boolean; review: CustomerReview | null; name: string; image: string | null; quantity: number; unitPrice: number }>;
           events: OrderEventEntry[];
           refundStatus: string;
           refundReason: string | null;
@@ -1053,7 +1049,8 @@ export function HomeClient({ products }: { products: Product[] }) {
         weightKg: null,
         warrantyMonths: null,
         countryOfOrigin: null,
-        rating: null,
+        ratingAverage: null,
+        ratingCount: 0,
         deliveryDaysMin: null,
         deliveryDaysMax: null,
         offerLabel: null,
@@ -1063,7 +1060,8 @@ export function HomeClient({ products }: { products: Product[] }) {
       const mapped: Order[] = data.orders
         .map((dbOrder): Order | null => {
           const items: CartLine[] = dbOrder.items.map((item) => ({
-            product: products.find((entry) => entry.name === item.name) ?? productFromSnapshot(item),
+            product: products.find((entry) => entry.id === item.listingId) ?? productFromSnapshot(item),
+            orderItemId: item.id, listingId: item.listingId, canReview: item.canReview, review: item.review,
             quantity: item.quantity,
           }));
 
@@ -2131,6 +2129,7 @@ export function HomeClient({ products }: { products: Product[] }) {
           />
         ) : viewedOrder ? (
           <OrderDetailView
+            onReviewSaved={refreshOrders}
             order={viewedOrder}
             onBack={() => {
               setViewedOrderId(null);
@@ -2464,7 +2463,6 @@ export function HomeClient({ products }: { products: Product[] }) {
                   onAddToCart={() => addToCart(product, 1)}
                   onIncrement={() => incrementCartItem(product.name)}
                   onDecrement={() => decrementCartItem(product.name)}
-                  rating={meta.rating}
                   deliveryDays={meta.deliveryDays}
                   offerLabel={meta.offerLabel}
                 />
@@ -2515,7 +2513,6 @@ export function HomeClient({ products }: { products: Product[] }) {
                   onAddToCart={() => addToCart(product, 1)}
                   onIncrement={() => incrementCartItem(product.name)}
                   onDecrement={() => decrementCartItem(product.name)}
-                  rating={meta.rating}
                   deliveryDays={meta.deliveryDays}
                   offerLabel={meta.offerLabel}
                 />
