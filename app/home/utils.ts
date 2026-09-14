@@ -13,23 +13,41 @@ import { parsePrice, formatPrice } from "./format";
 export { parsePrice, formatPrice };
 
 /**
- * Per-card display fields — prefers the admin's real `rating`/delivery
- * window/`offerLabel` when set, and falls back to the same deterministic
- * mock values (derived from the product's position/name) used before the
- * storefront read real data, so a listing left blank still looks populated.
+ * Builds the product detail gallery strip from the product's own images
+ * only — never other products' photos. Main image first, deduplicated
+ * (an admin could accidentally list the main image again in the gallery
+ * array), with falsy entries dropped.
  */
+export function buildGalleryImages(product: Pick<Product, "image" | "images">): string[] {
+  return Array.from(new Set([product.image, ...product.images].filter(Boolean)));
+}
 
+/**
+ * Formats a real delivery window from whichever of deliveryDaysMin/Max the
+ * admin actually set. Returns null when neither is set — callers must hide
+ * the delivery text (or show a neutral checkout-time label) rather than
+ * inventing a number, since a fake "2-3 days" reads as a real commitment.
+ */
+export function formatDeliveryEstimate(min: number | null, max: number | null): string | null {
+  if (min != null && max != null) {
+    return min === max ? `${min} days` : `${min}-${max} days`;
+  }
+  if (min != null) return `From ${min} days`;
+  if (max != null) return `Up to ${max} days`;
+  return null;
+}
+
+/**
+ * Per-card display fields. Rating is the admin's real `product.rating` or
+ * null — never a synthetic value; a product with no rating must render
+ * without one, not a fake "4.4 ★". `offerLabel` still falls back to a
+ * deterministic placeholder when unset (out of scope for this fix — only
+ * rating and delivery were reported as showing fabricated data).
+ */
 export function getProductDisplayMeta(products: Product[], product: Product) {
   const productIndex = products.findIndex((item) => item.name === product.name);
-  const rating = product.rating ?? 4.1 + ((productIndex + product.name.length) % 5) / 10;
-  const deliveryDays =
-    product.deliveryDaysMin != null && product.deliveryDaysMax != null
-      ? `${product.deliveryDaysMin}-${product.deliveryDaysMax} days`
-      : productIndex % 3 === 0
-      ? "2-3 days"
-      : productIndex % 3 === 1
-      ? "3-4 days"
-      : "4-5 days";
+  const rating = product.rating;
+  const deliveryDays = formatDeliveryEstimate(product.deliveryDaysMin, product.deliveryDaysMax);
   const offerLabel =
     product.offerLabel ??
     (productIndex % 3 === 0

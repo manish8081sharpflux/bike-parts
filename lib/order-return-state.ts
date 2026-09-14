@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { requestRefund } from "@/lib/order-refund-state";
 
@@ -69,12 +70,20 @@ export async function rejectReturn(orderId: string, adminNote: string) {
  * Atomically claims an approved return for reverse-pickup dispatch, mirroring
  * claimPorterDispatch's "DISPATCHING" placeholder pattern (see
  * order-delivery-state.ts) so a double-click can't create two Porter orders
- * for the same return.
+ * for the same return. Also blocked while a prior attempt's outcome is
+ * still uncertain (returnPorterOrderId stays "DISPATCHING" in that case —
+ * see failReturnPickupDispatch) so a retry can never race a pickup that may
+ * have already been created on Porter's side.
  */
 export async function claimReturnPickupDispatch(orderId: string) {
   const claim = await prisma.order.updateMany({
     where: { id: orderId, returnStatus: "APPROVED", returnPorterOrderId: null },
-    data: { returnPorterOrderId: "DISPATCHING" },
+    data: {
+      returnPorterOrderId: "DISPATCHING",
+      returnPorterAttemptedAt: new Date(),
+      returnPorterReconciliationRequired: false,
+      returnPorterLastError: null,
+    },
   });
   return claim.count === 1;
 }
@@ -91,6 +100,8 @@ export async function completeReturnPickupDispatch(
         returnPorterOrderId: result.porterOrderId,
         returnPorterStatus: result.status,
         returnPorterTrackingUrl: result.trackingUrl,
+        returnPorterReconciliationRequired: false,
+        returnPorterLastError: null,
       },
     });
     if (completed.count !== 1) return false;
@@ -101,15 +112,43 @@ export async function completeReturnPickupDispatch(
   });
 }
 
-export async function failReturnPickupDispatch(orderId: string, failureMessage: string) {
+/**
+ * Mirrors dispatchOrderAction's exact definite-vs-uncertain split for the
+ * forward delivery (see admin-orders.ts), applied to the reverse pickup:
+ *
+ * - Definite failure (Porter clearly rejected the request before creating a
+ *   pickup): clear the claim so dispatch can be retried, and record why.
+ * - Uncertain failure (timeout/ECONNRESET/socket interruption, or a
+ *   response missing a Porter order id — the pickup may have actually been
+ *   created): do NOT clear the claim. returnPorterOrderId stays
+ *   "DISPATCHING" (blocking claimReturnPickupDispatch's WHERE clause from
+ *   ever matching again) and returnPorterReconciliationRequired is set so
+ *   an operator has to verify with Porter directly before anything can be
+ *   retried — never automatic.
+ */
+export async function failReturnPickupDispatch(orderId: string, failureMessage: string, uncertain: boolean) {
   await prisma.$transaction(async (tx) => {
-    await tx.order.updateMany({
-      where: { id: orderId, returnPorterOrderId: "DISPATCHING" },
-      data: { returnPorterOrderId: null, returnPorterStatus: null },
-    });
-    await tx.orderEvent.create({
-      data: { orderId, type: "RETURN_PICKUP_DISPATCH_FAILED", message: failureMessage },
-    });
+    if (uncertain) {
+      await tx.order.updateMany({
+        where: { id: orderId, returnPorterOrderId: "DISPATCHING" },
+        data: {
+          returnPorterStatus: "RECONCILIATION_REQUIRED",
+          returnPorterReconciliationRequired: true,
+          returnPorterLastError: failureMessage,
+        },
+      });
+      await tx.orderEvent.create({
+        data: { orderId, type: "RETURN_PICKUP_RECONCILIATION_REQUIRED", message: failureMessage },
+      });
+    } else {
+      await tx.order.updateMany({
+        where: { id: orderId, returnPorterOrderId: "DISPATCHING" },
+        data: { returnPorterOrderId: null, returnPorterStatus: null, returnPorterLastError: failureMessage },
+      });
+      await tx.orderEvent.create({
+        data: { orderId, type: "RETURN_PICKUP_DISPATCH_FAILED", message: failureMessage },
+      });
+    }
   });
 }
 
@@ -137,23 +176,81 @@ export async function applyReturnPorterStatus(orderId: string, rawStatus: string
 }
 
 /**
+ * Increments BikePartListing.stock for every line item on this order that
+ * still resolves to a live listing — only ever called for a RESELLABLE
+ * return (see markReturnReceived), never automatically. Guarded by
+ * returnStockRestored, claimed atomically in the same transaction as the
+ * rest of markReturnReceived, so neither a repeated click nor a retried
+ * request can restore stock twice for the same return.
+ */
+async function restoreReturnedStock(orderId: string, tx: Prisma.TransactionClient): Promise<boolean> {
+  const claim = await tx.order.updateMany({
+    where: { id: orderId, returnStockRestored: false },
+    data: { returnStockRestored: true },
+  });
+  if (claim.count !== 1) return false;
+
+  const items = await tx.orderItem.findMany({
+    where: { orderId, listingId: { not: null } },
+    select: { listingId: true, quantity: true },
+  });
+  for (const item of items) {
+    // listingId is non-null by the query above; Prisma's type still allows
+    // null since it can't express that filter in the return type.
+    if (!item.listingId) continue;
+    await tx.bikePartListing.update({
+      where: { id: item.listingId },
+      data: { stock: { increment: item.quantity } },
+    });
+  }
+  await tx.orderEvent.create({
+    data: {
+      orderId,
+      type: "RETURN_STOCK_RESTORED",
+      message: `Stock restored for ${items.length} item(s) — condition: resellable.`,
+    },
+  });
+  return true;
+}
+
+export type ReturnCondition = "RESELLABLE" | "DAMAGED";
+
+/**
  * Admin confirms the returned item is physically back at the warehouse.
  * Allowed from PICKED_UP (the normal path) or PICKUP_SCHEDULED (a manual
  * fallback for when Porter's tracking doesn't reliably report pickup) —
  * automatically kicks off the existing refund flow so the money side reuses
  * the same tested Razorpay approve/reject code a cancellation refund does.
+ *
+ * `condition` is a required, explicit admin choice — a returned part may be
+ * resellable, damaged, opened, or scrap, so stock is never restored
+ * automatically. Only RESELLABLE ever increases BikePartListing.stock (see
+ * restoreReturnedStock), and only once (returnStockRestored guards repeats).
  */
-export async function markReturnReceived(orderId: string, adminNote: string) {
+export async function markReturnReceived(orderId: string, adminNote: string, condition: ReturnCondition) {
   return prisma.$transaction(async (tx) => {
     const claim = await tx.order.updateMany({
       where: { id: orderId, returnStatus: { in: ["PICKED_UP", "PICKUP_SCHEDULED"] } },
-      data: { returnStatus: "RECEIVED", returnAdminNote: adminNote || null, returnReceivedAt: new Date() },
+      data: {
+        returnStatus: "RECEIVED",
+        returnAdminNote: adminNote || null,
+        returnReceivedAt: new Date(),
+        returnCondition: condition,
+      },
     });
-    if (claim.count !== 1) return false;
+    if (claim.count !== 1) return { received: false, stockRestored: false };
+
     await tx.orderEvent.create({
-      data: { orderId, type: "RETURN_RECEIVED", message: `Return received at warehouse${adminNote ? ` — ${adminNote}` : ""}` },
+      data: {
+        orderId,
+        type: "RETURN_RECEIVED",
+        message: `Return received at warehouse — condition: ${condition === "RESELLABLE" ? "resellable" : "damaged / not restocked"}${adminNote ? ` — ${adminNote}` : ""}`,
+      },
     });
+
+    const stockRestored = condition === "RESELLABLE" ? await restoreReturnedStock(orderId, tx) : false;
+
     await requestRefund(orderId, "Product returned and received", tx);
-    return true;
+    return { received: true, stockRestored };
   });
 }

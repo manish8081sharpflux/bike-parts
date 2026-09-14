@@ -147,7 +147,9 @@ export function CatalogView({
     if (sortOption === "price-asc") return parsePrice(a.price) - parsePrice(b.price);
     if (sortOption === "price-desc") return parsePrice(b.price) - parsePrice(a.price);
     if (sortOption === "rating-desc")
-      return getProductDisplayMeta(products, b).rating - getProductDisplayMeta(products, a).rating;
+      // Unrated products (rating null) sort after rated ones instead of
+      // comparing against a fake number.
+      return (getProductDisplayMeta(products, b).rating ?? 0) - (getProductDisplayMeta(products, a).rating ?? 0);
     return 0;
   });
   const title = activeCategory

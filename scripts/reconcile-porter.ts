@@ -1,8 +1,9 @@
 /**
- * Read-only report of Porter dispatches stuck in an uncertain state — never
- * retries dispatch creation itself (an uncertain dispatch may have actually
- * succeeded on Porter's side; blindly retrying risks a duplicate pickup).
- * Safe to run repeatedly/on a schedule: it only reads.
+ * Read-only report of Porter dispatches AND reverse pickups stuck in an
+ * uncertain state — never retries dispatch/pickup creation itself (an
+ * uncertain attempt may have actually succeeded on Porter's side; blindly
+ * retrying risks a duplicate delivery or pickup). Safe to run repeatedly/on
+ * a schedule: it only reads.
  *
  * Usage: pnpm reconcile:porter
  */
@@ -12,7 +13,7 @@ async function main() {
   const olderThanMinutes = Number(process.env.PORTER_RECONCILE_OLDER_THAN_MINUTES ?? 15);
   const cutoff = new Date(Date.now() - olderThanMinutes * 60 * 1000);
 
-  const orders = await prisma.order.findMany({
+  const forwardDeliveries = await prisma.order.findMany({
     where: {
       OR: [
         { porterReconciliationRequired: true },
@@ -31,9 +32,34 @@ async function main() {
     orderBy: { porterAttemptedAt: "asc" },
   });
 
-  console.table(orders);
-  console.log(`Found ${orders.length} Porter reconciliation candidate(s). Read-only report; no state was changed.`);
-  if (orders.length > 0) process.exitCode = 1;
+  const reversePickups = await prisma.order.findMany({
+    where: {
+      OR: [
+        { returnPorterReconciliationRequired: true },
+        { returnPorterOrderId: "DISPATCHING", returnPorterAttemptedAt: { lt: cutoff } },
+      ],
+    },
+    select: {
+      id: true,
+      returnStatus: true,
+      returnPorterOrderId: true,
+      returnPorterStatus: true,
+      returnPorterAttemptedAt: true,
+      returnPorterLastError: true,
+      returnPorterReconciliationRequired: true,
+    },
+    orderBy: { returnPorterAttemptedAt: "asc" },
+  });
+
+  console.log(`\nForward deliveries needing reconciliation (${forwardDeliveries.length}):`);
+  console.table(forwardDeliveries);
+
+  console.log(`\nReverse (return) pickups needing reconciliation (${reversePickups.length}):`);
+  console.table(reversePickups);
+
+  const total = forwardDeliveries.length + reversePickups.length;
+  console.log(`\nFound ${total} Porter reconciliation candidate(s) total. Read-only report; no state was changed.`);
+  if (total > 0) process.exitCode = 1;
 }
 
 main()

@@ -17,6 +17,7 @@
     "test:porter-state": "tsx --test scripts/porter-state.test.ts",
     "test:addresses": "tsx --test scripts/addresses.test.ts scripts/addresses-http.test.ts",
     "test:product-details": "node --test scripts/product-details.test.mjs",
+    "test:product-display": "tsx --test scripts/product-display.test.ts",
     "test:product-image-storage": "tsx --test scripts/product-image-storage.test.ts",
     "test:product-image-storage-prod": "tsx --test scripts/product-image-storage-prod.test.ts",
     "test:search": "tsx --test scripts/search.test.ts scripts/search-live.test.mts",

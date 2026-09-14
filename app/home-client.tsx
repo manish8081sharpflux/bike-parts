@@ -154,7 +154,9 @@ export function HomeClient({ products }: { products: Product[] }) {
       [...products]
         .sort(
           (a, b) =>
-            getProductDisplayMeta(products, b).rating - getProductDisplayMeta(products, a).rating
+            // Unrated products (rating null) sort after rated ones instead
+            // of comparing against a fake number.
+            (getProductDisplayMeta(products, b).rating ?? 0) - (getProductDisplayMeta(products, a).rating ?? 0)
         )
         .slice(0, 10),
     [products]
@@ -2117,7 +2119,6 @@ export function HomeClient({ products }: { products: Product[] }) {
           <ProductDetailDrawer
             key={selectedProduct.name}
             product={selectedProduct}
-            products={products}
             selectedBrand={selectedBrandData}
             selectedModel={selectedModel ?? ""}
             selectedYear={selectedYear}

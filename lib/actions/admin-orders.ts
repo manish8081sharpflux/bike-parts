@@ -31,6 +31,7 @@ import {
   failReturnPickupDispatch,
   markReturnReceived,
   rejectReturn,
+  type ReturnCondition,
 } from "@/lib/order-return-state";
 import type { OrderStatus } from "@prisma/client";
 
@@ -360,6 +361,9 @@ export async function dispatchReturnPickupAction(orderId: string) {
     if (order.returnStatus !== "APPROVED") {
       throw new Error("This return has not been approved yet.");
     }
+    if (order.returnPorterReconciliationRequired) {
+      throw new Error("Pickup outcome is uncertain. Verify the pickup with Porter before dispatching again.");
+    }
     if (order.returnPorterOrderId) {
       throw new Error("A pickup has already been dispatched for this return.");
     }
@@ -419,7 +423,12 @@ export async function dispatchReturnPickupAction(orderId: string) {
     console.error("[porter] Return pickup dispatch failed for order", orderId, error);
     if (claimed) {
       const failureMessage = error instanceof Error ? error.message : "Could not dispatch this return pickup.";
-      await failReturnPickupDispatch(orderId, failureMessage).catch((dbError) => {
+      // Same definite-vs-uncertain split as dispatchOrderAction: a timeout,
+      // ECONNRESET, socket interruption, or a response missing a Porter
+      // order id means the pickup may already exist on Porter's side — that
+      // must never be treated as "safe to retry."
+      const uncertain = error instanceof PorterRequestError && error.uncertain;
+      await failReturnPickupDispatch(orderId, failureMessage, uncertain).catch((dbError) => {
         console.error("[porter] Also failed to record return-dispatch-failed state for order", orderId, dbError);
       });
     }
@@ -437,6 +446,9 @@ export async function refreshReturnPickupStatusAction(orderId: string) {
 
   try {
     const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
+    if (order.returnPorterReconciliationRequired) {
+      throw new Error("Pickup outcome is uncertain. Verify the pickup with Porter before refreshing status.");
+    }
     if (!order.returnPorterOrderId || order.returnPorterOrderId === "DISPATCHING") {
       throw new Error("This return has not been dispatched for pickup yet.");
     }
@@ -463,8 +475,12 @@ export async function refreshReturnPickupStatusAction(orderId: string) {
 export async function markReturnReceivedAction(orderId: string, formData: FormData) {
   await requireAdminAction();
   const adminNote = String(formData.get("returnAdminNote") ?? "").trim();
+  const conditionRaw = String(formData.get("returnCondition") ?? "");
+  if (conditionRaw !== "RESELLABLE" && conditionRaw !== "DAMAGED") {
+    redirect(`/admin/orders/${orderId}?error=${encodeURIComponent("Choose whether the returned item is resellable or damaged before marking it received.")}`);
+  }
 
-  const received = await markReturnReceived(orderId, adminNote);
+  const { received } = await markReturnReceived(orderId, adminNote, conditionRaw as ReturnCondition);
   if (!received) {
     redirect(`/admin/orders/${orderId}?error=${encodeURIComponent("This return is not ready to be marked received.")}`);
   }

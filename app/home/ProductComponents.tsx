@@ -6,7 +6,7 @@ import Image from "next/image";
 import { ArrowRight, Bike, CheckCircle2, FileText, ListChecks, Minus, Plus, ShoppingCart, Star } from "lucide-react";
 import type { Product } from "@/lib/storefront-catalog";
 import { brands, brandModels } from "./constants";
-import { getProductDisplayMeta, parsePrice, formatPrice } from "./utils";
+import { buildGalleryImages, formatDeliveryEstimate, getProductDisplayMeta, parsePrice, formatPrice } from "./utils";
 import { BrandLogo } from "./BrandModals";
 
 export function ProductCard({
@@ -32,13 +32,14 @@ export function ProductCard({
   onIncrement: () => void;
   onDecrement: () => void;
   compact?: boolean;
-  /** Real per-product rating/delivery-window/offer label when set — see getProductDisplayMeta. Unused in compact mode. */
-  rating?: number;
-  deliveryDays?: string;
+  /** Real per-product rating/delivery-window/offer label when set — see getProductDisplayMeta. null/absent means no data; never render a fake value. Unused in compact mode. */
+  rating?: number | null;
+  deliveryDays?: string | null;
   offerLabel?: string;
 }) {
   if (!compact) {
-    const ratingLabel = (rating ?? 0).toFixed(1);
+    const hasRating = rating != null;
+    const hasDelivery = Boolean(deliveryDays);
 
     return (
       <article
@@ -114,14 +115,20 @@ export function ProductCard({
             )}
           </div>
 
-          <div className="mt-1 flex min-w-0 items-center gap-1 text-[10px] font-bold text-zinc-950 sm:gap-1.5 sm:text-xs">
-            <span className="grid size-4 shrink-0 place-items-center rounded-full bg-emerald-600 text-white sm:size-5">
-              <Star className="size-2.5 fill-current sm:size-3" />
-            </span>
-            <span>{ratingLabel}</span>
-            <span className="text-zinc-950">&bull;</span>
-            <span className="truncate">{deliveryDays}</span>
-          </div>
+          {hasRating || hasDelivery ? (
+            <div className="mt-1 flex min-w-0 items-center gap-1 text-[10px] font-bold text-zinc-950 sm:gap-1.5 sm:text-xs">
+              {rating != null ? (
+                <>
+                  <span className="grid size-4 shrink-0 place-items-center rounded-full bg-emerald-600 text-white sm:size-5">
+                    <Star className="size-2.5 fill-current sm:size-3" />
+                  </span>
+                  <span>{rating.toFixed(1)}</span>
+                </>
+              ) : null}
+              {hasRating && hasDelivery ? <span className="text-zinc-950">&bull;</span> : null}
+              {hasDelivery ? <span className="truncate">{deliveryDays}</span> : null}
+            </div>
+          ) : null}
 
           <p className="mt-1 truncate text-[10px] font-medium text-zinc-500 sm:text-xs">
             {product.category}, Genuine Parts, Compatible Fit
@@ -267,7 +274,6 @@ export function ProductCardSkeleton() {
 
 export function ProductDetailDrawer({
   product,
-  products,
   selectedBrand,
   selectedModel,
   selectedYear,
@@ -279,7 +285,6 @@ export function ProductDetailDrawer({
   onDecrement,
 }: {
   product: Product;
-  products: Product[];
   selectedBrand: (typeof brands)[number] | undefined;
   selectedModel: string;
   selectedYear: string;
@@ -294,15 +299,13 @@ export function ProductDetailDrawer({
     "details" | "specifications" | "compatible"
   >("details");
   const [activeImage, setActiveImage] = useState(product.image);
-  // Tracked separately from activeImage (by name, not URL) so the right thumbnail
-  // stays highlighted even when two products happen to share the same stock photo.
-  const [activePhotoName, setActivePhotoName] = useState(product.name);
-  // "More Photos" strip: other parts from the same category, standing in as
-  // related angles/photos of this product — click one to view it on the left.
-  const galleryImages = [
-    product,
-    ...products.filter((item) => item.category === product.category && item.name !== product.name),
-  ].slice(0, 4);
+  // "More Photos" strip: this product's own main image plus its gallery
+  // photos — never other products' images. `product.image` already falls
+  // back to a placeholder when the listing has no main image (see
+  // mapListingToProduct), so it's never empty here. Deduplicated (an admin
+  // could accidentally list the main image again in the gallery) with the
+  // main image always first.
+  const galleryImages = buildGalleryImages(product);
   const [isZooming, setIsZooming] = useState(false);
   const [zoomPos, setZoomPos] = useState({ x: 50, y: 50 });
   const zoomFactor = 2.5;
@@ -511,24 +514,21 @@ export function ProductDetailDrawer({
               <div className="mt-6 sm:mt-8">
                 <p className="text-xs font-bold text-zinc-500">More Photos</p>
                 <div className="mt-2 flex gap-2">
-                  {galleryImages.map((item) => (
+                  {galleryImages.map((url, index) => (
                     <button
                       type="button"
-                      key={item.name}
-                      onClick={() => {
-                        setActiveImage(item.image);
-                        setActivePhotoName(item.name);
-                      }}
-                      aria-label={`Show photo: ${item.name}`}
+                      key={url}
+                      onClick={() => setActiveImage(url)}
+                      aria-label={`Show photo ${index + 1} of ${product.name}`}
                       className={`grid size-16 shrink-0 place-items-center overflow-hidden rounded-lg bg-[#fbfbfa] ring-2 transition sm:size-20 ${
-                        activePhotoName === item.name
+                        activeImage === url
                           ? "ring-[#ff4b1f]"
                           : "ring-zinc-100 hover:ring-zinc-300"
                       }`}
                     >
                       <Image
-                        src={item.image}
-                        alt={item.name}
+                        src={url}
+                        alt={`${product.name} photo ${index + 1}`}
                         width={72}
                         height={72}
                         className="h-full w-full object-contain p-1.5"
@@ -625,6 +625,7 @@ export function ProductDetailDrawer({
                       ["Warranty", product.warrantyMonths != null ? `${product.warrantyMonths} Months Manufacturer Warranty` : null],
                       ["Country of Origin", product.countryOfOrigin],
                       ["Finish", product.finish],
+                      ["Delivery Estimate", formatDeliveryEstimate(product.deliveryDaysMin, product.deliveryDaysMax)],
                       ...product.specifications.map((spec) => [spec.name, spec.value]),
                     ]
                       .filter(([, value]) => value)

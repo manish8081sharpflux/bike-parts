@@ -260,18 +260,28 @@ export default async function AdminOrderDetailPage({
                   </form>
                 </div>
               ) : order.returnStatus === "APPROVED" ? (
-                <form action={boundDispatchReturnPickup} className="mt-3">
-                  <p className="mb-2 text-xs text-zinc-500">
-                    Creates a reverse Porter pickup — the customer&apos;s address becomes the pickup point,
-                    the warehouse the drop.
-                  </p>
-                  <button
-                    type="submit"
-                    className="h-10 w-full rounded-lg bg-[#ff4b1f] text-sm font-bold text-white hover:bg-[#e8330e]"
-                  >
-                    Dispatch pickup with Porter
-                  </button>
-                </form>
+                order.returnPorterReconciliationRequired ? (
+                  <div className="mt-3 rounded-lg bg-amber-50 px-4 py-3 text-xs font-medium text-amber-800">
+                    <p className="font-bold">Pickup outcome is uncertain.</p>
+                    <p className="mt-1">Verify the pickup with Porter before dispatching again.</p>
+                    {order.returnPorterLastError ? (
+                      <p className="mt-2 text-[11px] text-amber-700">{order.returnPorterLastError}</p>
+                    ) : null}
+                  </div>
+                ) : (
+                  <form action={boundDispatchReturnPickup} className="mt-3">
+                    <p className="mb-2 text-xs text-zinc-500">
+                      Creates a reverse Porter pickup — the customer&apos;s address becomes the pickup point,
+                      the warehouse the drop.
+                    </p>
+                    <button
+                      type="submit"
+                      className="h-10 w-full rounded-lg bg-[#ff4b1f] text-sm font-bold text-white hover:bg-[#e8330e]"
+                    >
+                      Dispatch pickup with Porter
+                    </button>
+                  </form>
+                )
               ) : order.returnStatus === "PICKUP_SCHEDULED" || order.returnStatus === "PICKED_UP" ? (
                 <div className="mt-3 flex flex-col gap-2">
                   {order.returnPorterOrderId && order.returnPorterOrderId !== "DISPATCHING" ? (
@@ -299,6 +309,27 @@ export default async function AdminOrderDetailPage({
                     </button>
                   </form>
                   <form action={boundMarkReturnReceived} className="flex flex-col gap-2">
+                    <label className="text-xs font-bold text-zinc-700">
+                      Return condition
+                      <div className="relative mt-1">
+                        <select
+                          name="returnCondition"
+                          required
+                          defaultValue=""
+                          className="h-10 w-full appearance-none rounded-lg border border-zinc-300 bg-white px-3 pr-9 text-sm font-semibold text-[#070e2b] outline-none transition focus:border-[#ff4b1f] focus:ring-2 focus:ring-[#ff4b1f]/15"
+                        >
+                          <option value="" disabled>
+                            Choose condition…
+                          </option>
+                          <option value="RESELLABLE">Resellable — restock this item</option>
+                          <option value="DAMAGED">Damaged / do not restock</option>
+                        </select>
+                        <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-zinc-400" />
+                      </div>
+                    </label>
+                    <p className="text-[11px] text-zinc-500">
+                      Only &quot;Resellable&quot; increases stock — and only once, even if this is submitted twice.
+                    </p>
                     <textarea
                       name="returnAdminNote"
                       placeholder="Note on item condition (optional)"
@@ -319,6 +350,17 @@ export default async function AdminOrderDetailPage({
                 </p>
               ) : (
                 <>
+                  {order.returnCondition ? (
+                    <p className="mt-2 text-xs text-zinc-500">
+                      <span className="font-bold text-zinc-700">Condition: </span>
+                      {order.returnCondition === "RESELLABLE" ? "Resellable" : "Damaged / not restocked"}
+                      {order.returnCondition === "RESELLABLE" ? (
+                        <span className={order.returnStockRestored ? "ml-1 text-emerald-600" : "ml-1 text-amber-600"}>
+                          — stock {order.returnStockRestored ? "restored" : "not yet restored"}
+                        </span>
+                      ) : null}
+                    </p>
+                  ) : null}
                   {order.returnAdminNote ? (
                     <p className="mt-2 text-xs text-zinc-500">
                       <span className="font-bold text-zinc-700">Note: </span>
