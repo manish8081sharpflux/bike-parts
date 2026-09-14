@@ -49,7 +49,18 @@ declare global {
 }
 
 
-export type CartLine = { product: Product; quantity: number; orderItemId?: string; listingId?: string | null; canReview?: boolean; review?: import("@/lib/reviews/types").CustomerReview | null };
+export type CartLine = {
+  product: Product;
+  quantity: number;
+  orderItemId?: string;
+  listingId?: string | null;
+  canReview?: boolean;
+  review?: import("@/lib/reviews/types").CustomerReview | null;
+  /** Non-REJECTED quantity already covered by an item-level return (see partialReturns on Order). */
+  returnedQuantity?: number;
+  /** How many more units of this line item can still be returned — purchased minus returnedQuantity, 0 once the order is no longer delivered. */
+  remainingReturnable?: number;
+};
 
 
 export type Address = {
@@ -90,6 +101,38 @@ export type ReturnStatus =
   | "picked_up"
   | "received";
 
+/** Mirrors the DB's OrderReturnStatus enum, lowercased to match this file's other status vocabularies. Deliberately separate from ReturnStatus above — an order can have several PartialReturns, each moving through this independently, alongside (or instead of) one legacy whole-order return. */
+export type PartialReturnStatus =
+  | "requested"
+  | "approved"
+  | "pickup_scheduled"
+  | "picked_up"
+  | "received"
+  | "rejected";
+
+/** Mirrors the DB's OrderReturnRefundStatus enum. */
+export type PartialRefundStatus = "none" | "requested" | "processing" | "refunded" | "failed";
+
+export type PartialReturnLine = { orderItemId: string; quantity: number; productName: string };
+
+/** One item/quantity-level return request — see OrderReturn in the DB. */
+export type PartialReturn = {
+  id: string;
+  status: PartialReturnStatus;
+  reason: string;
+  adminNote: string | null;
+  requestedAt: number;
+  approvedAt: number | null;
+  receivedAt: number | null;
+  condition: "RESELLABLE" | "DAMAGED" | null;
+  porterStatus: string | null;
+  porterTrackingUrl: string | null;
+  refundStatus: PartialRefundStatus;
+  refundAmount: number | null;
+  refundProcessedAt: number | null;
+  items: PartialReturnLine[];
+};
+
 export type Order = {
   id: string;
   /** Full, untruncated DB id — `id` above is shortened for display, this is what refund/reorder calls to the server actually address. */
@@ -121,6 +164,8 @@ export type Order = {
   returnRequestedAt: number | null;
   returnPorterTrackingUrl: string | null;
   returnReceivedAt: number | null;
+  /** Item/quantity-level returns — independent of returnStatus above, each with its own lifecycle. See OrderReturn in the DB. */
+  partialReturns: PartialReturn[];
 };
 
 /**

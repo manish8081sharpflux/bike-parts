@@ -60,6 +60,8 @@ import {
   getRiderForOrder,
   loadRazorpayCheckout,
   mapDbOrderStatus,
+  mapDbPartialRefundStatus,
+  mapDbPartialReturnStatus,
   mapDbRefundStatus,
   mapDbReturnStatus,
   parseEstimateDayRange,
@@ -115,6 +117,7 @@ export function HomeClient({ products }: { products: Product[] }) {
       | "returnRequestedAt"
       | "returnPorterTrackingUrl"
       | "returnReceivedAt"
+      | "partialReturns"
     > & { deliveryCharge: number; discount: number }
   ): Order | null => {
     if (overrides.items.length === 0) return null;
@@ -140,6 +143,7 @@ export function HomeClient({ products }: { products: Product[] }) {
       returnRequestedAt: null,
       returnPorterTrackingUrl: null,
       returnReceivedAt: null,
+      partialReturns: [],
       itemTotal,
       taxAmount: 0,
       total: itemTotal + overrides.deliveryCharge - overrides.discount,
@@ -1000,7 +1004,7 @@ export function HomeClient({ products }: { products: Product[] }) {
           amount: number;
           porterStatus: string | null;
           deliveryAddress: Partial<Address> | null;
-          items: Array<{ id: string; listingId: string | null; canReview: boolean; review: CustomerReview | null; name: string; image: string | null; quantity: number; unitPrice: number }>;
+          items: Array<{ id: string; listingId: string | null; canReview: boolean; review: CustomerReview | null; name: string; image: string | null; quantity: number; unitPrice: number; returnedQuantity: number; remainingReturnable: number }>;
           events: OrderEventEntry[];
           refundStatus: string;
           refundReason: string | null;
@@ -1014,6 +1018,22 @@ export function HomeClient({ products }: { products: Product[] }) {
           returnRequestedAt: number | null;
           returnPorterTrackingUrl: string | null;
           returnReceivedAt: number | null;
+          partialReturns: Array<{
+            id: string;
+            status: string;
+            reason: string;
+            adminNote: string | null;
+            requestedAt: number;
+            approvedAt: number | null;
+            receivedAt: number | null;
+            condition: "RESELLABLE" | "DAMAGED" | null;
+            porterStatus: string | null;
+            porterTrackingUrl: string | null;
+            refundStatus: string;
+            refundAmount: number | null;
+            refundProcessedAt: number | null;
+            items: Array<{ orderItemId: string; quantity: number; productName: string }>;
+          }>;
         }>;
       };
 
@@ -1063,6 +1083,8 @@ export function HomeClient({ products }: { products: Product[] }) {
             product: products.find((entry) => entry.id === item.listingId) ?? productFromSnapshot(item),
             orderItemId: item.id, listingId: item.listingId, canReview: item.canReview, review: item.review,
             quantity: item.quantity,
+            returnedQuantity: item.returnedQuantity,
+            remainingReturnable: item.remainingReturnable,
           }));
 
           if (items.length === 0) return null;
@@ -1089,6 +1111,22 @@ export function HomeClient({ products }: { products: Product[] }) {
             returnRequestedAt: dbOrder.returnRequestedAt,
             returnPorterTrackingUrl: dbOrder.returnPorterTrackingUrl,
             returnReceivedAt: dbOrder.returnReceivedAt,
+            partialReturns: dbOrder.partialReturns.map((partialReturn) => ({
+              id: partialReturn.id,
+              status: mapDbPartialReturnStatus(partialReturn.status),
+              reason: partialReturn.reason,
+              adminNote: partialReturn.adminNote,
+              requestedAt: partialReturn.requestedAt,
+              approvedAt: partialReturn.approvedAt,
+              receivedAt: partialReturn.receivedAt,
+              condition: partialReturn.condition,
+              porterStatus: partialReturn.porterStatus,
+              porterTrackingUrl: partialReturn.porterTrackingUrl,
+              refundStatus: mapDbPartialRefundStatus(partialReturn.refundStatus),
+              refundAmount: partialReturn.refundAmount,
+              refundProcessedAt: partialReturn.refundProcessedAt,
+              items: partialReturn.items,
+            })),
             statusNote:
               status === "delivered"
                 ? "Your order was delivered"
@@ -1205,6 +1243,44 @@ export function HomeClient({ products }: { products: Product[] }) {
       setReturnRequestError("Could not submit the return request. Check your connection and try again.");
     } finally {
       setIsRequestingReturn(false);
+    }
+  };
+
+  const [isRequestingPartialReturn, setIsRequestingPartialReturn] = useState(false);
+  const [partialReturnError, setPartialReturnError] = useState<string | null>(null);
+
+  /**
+   * Customer-initiated item/quantity-level return — see
+   * app/api/orders/[id]/returns (plural; distinct from the whole-order
+   * endpoint above). The server re-verifies ownership, delivery state, and
+   * remaining returnable quantity itself (lib/order-returns/service.ts); the
+   * selected lines sent here are only ever a starting point, never trusted
+   * as final. Refetches orders on success so the new entry shows up in
+   * order.partialReturns immediately.
+   */
+  const requestPartialReturn = async (order: Order, reason: string, lines: Array<{ orderItemId: string; quantity: number }>): Promise<boolean> => {
+    if (!isAuthenticated || isRequestingPartialReturn) return false;
+
+    setIsRequestingPartialReturn(true);
+    setPartialReturnError(null);
+    try {
+      const response = await fetch(`/api/orders/${order.dbId}/returns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason, items: lines }),
+      });
+      const data = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) {
+        setPartialReturnError(data.error ?? "Could not submit the return request.");
+        return false;
+      }
+      await refreshOrders();
+      return true;
+    } catch {
+      setPartialReturnError("Could not submit the return request. Check your connection and try again.");
+      return false;
+    } finally {
+      setIsRequestingPartialReturn(false);
     }
   };
 
@@ -2138,6 +2214,9 @@ export function HomeClient({ products }: { products: Product[] }) {
             onRequestReturn={(reason) => requestReturn(viewedOrder, reason)}
             isRequestingReturn={isRequestingReturn}
             returnRequestError={returnRequestError}
+            onRequestPartialReturn={(reason, lines) => requestPartialReturn(viewedOrder, reason, lines)}
+            isRequestingPartialReturn={isRequestingPartialReturn}
+            partialReturnError={partialReturnError}
             onCancelOrder={() => cancelOrder(viewedOrder)}
             isCancellingOrder={isCancellingOrder}
             cancelOrderError={cancelOrderError}

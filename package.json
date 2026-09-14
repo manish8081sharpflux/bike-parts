@@ -13,6 +13,7 @@
     "test:checkout-payment-race": "tsx --test scripts/checkout-payment-race.test.ts",
     "test:order-refund-state": "tsx --test scripts/order-refund-state.test.ts",
     "test:order-return-state": "tsx --test scripts/order-return-state.test.ts",
+    "test:order-returns-partial": "tsx --test scripts/order-returns-partial.test.ts",
     "test:webhook-lifecycle": "tsx --test scripts/webhook-lifecycle.test.ts",
     "test:porter-state": "tsx --test scripts/porter-state.test.ts",
     "test:addresses": "tsx --test scripts/addresses.test.ts scripts/addresses-http.test.ts",

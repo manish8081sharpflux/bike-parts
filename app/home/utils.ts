@@ -4,7 +4,7 @@
 // monolithic home-client.tsx.
 import { MapPin } from "lucide-react";
 import type { Product } from "@/lib/storefront-catalog";
-import type { Address, Order, OrderEventEntry, OrderStatus, RefundStatus, ReturnStatus } from "./types";
+import type { Address, Order, OrderEventEntry, OrderStatus, PartialRefundStatus, PartialReturnStatus, RefundStatus, ReturnStatus } from "./types";
 import { addressIcons, riderRoster, stepIndexForStatus } from "./constants";
 import { parsePrice, formatPrice } from "./format";
 
@@ -107,6 +107,25 @@ export const mapDbReturnStatus = (status: string): ReturnStatus => {
   if (status === "PICKUP_SCHEDULED") return "pickup_scheduled";
   if (status === "PICKED_UP") return "picked_up";
   if (status === "RECEIVED") return "received";
+  return "none";
+};
+
+/** Maps the backend's OrderReturnStatus enum (one item/quantity-level return) to this UI's lowercased vocabulary — no "none" case since a PartialReturn only ever exists once actually requested. */
+export const mapDbPartialReturnStatus = (status: string): PartialReturnStatus => {
+  if (status === "APPROVED") return "approved";
+  if (status === "PICKUP_SCHEDULED") return "pickup_scheduled";
+  if (status === "PICKED_UP") return "picked_up";
+  if (status === "RECEIVED") return "received";
+  if (status === "REJECTED") return "rejected";
+  return "requested";
+};
+
+/** Maps the backend's OrderReturnRefundStatus enum. */
+export const mapDbPartialRefundStatus = (status: string): PartialRefundStatus => {
+  if (status === "REQUESTED") return "requested";
+  if (status === "PROCESSING") return "processing";
+  if (status === "REFUNDED") return "refunded";
+  if (status === "FAILED") return "failed";
   return "none";
 };
 

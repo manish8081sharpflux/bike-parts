@@ -97,21 +97,21 @@ enum NotificationChannel {
 }
 
 model User {
-  id           String         @id @default(cuid())
-  email        String?        @unique
-  phone        String?        @unique
-  name         String?
+  id               String            @id @default(cuid())
+  email            String?           @unique
+  phone            String?           @unique
+  name             String?
   // true for customers created directly from the admin Customers page; false
   // (default) for the normal path — a User row upserted by phone the first
   // time someone checks out / logs in on the storefront.
-  addedByAdmin Boolean        @default(false)
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
-  seller       SellerProfile?
-  orders       Order[]
+  addedByAdmin     Boolean           @default(false)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  seller           SellerProfile?
+  orders           Order[]
   customerSessions CustomerSession[]
-  addresses    Address[]
-  productReviews ProductReview[]
+  addresses        Address[]
+  productReviews   ProductReview[]
 }
 
 // Customer-owned delivery address book. Orders never read this table live —
@@ -142,13 +142,13 @@ model Address {
 }
 
 model CustomerOtpChallenge {
-  id        String   @id @default(cuid())
-  phone     String   @unique
+  id        String    @id @default(cuid())
+  phone     String    @unique
   codeHash  String
   expiresAt DateTime
-  attempts  Int      @default(0)
+  attempts  Int       @default(0)
   usedAt    DateTime?
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
 }
 
 model CustomerSession {
@@ -175,49 +175,49 @@ model SellerProfile {
 }
 
 model BikePartListing {
-  id               String           @id @default(cuid())
-  sellerId         String?
-  name             String
-  slug             String           @unique
-  brand            String
-  category         String
-  condition        ListingCondition @default(NEW)
-  description      String           @default("")
-  price            Decimal          @db.Decimal(10, 2)
-  gstRate          Decimal          @default(18) @db.Decimal(5, 2)
-  stock            Int              @default(0)
-  city             String?
-  imageUrl         String?
-  images           String[]         @default([])
+  id                 String           @id @default(cuid())
+  sellerId           String?
+  name               String
+  slug               String           @unique
+  brand              String
+  category           String
+  condition          ListingCondition @default(NEW)
+  description        String           @default("")
+  price              Decimal          @db.Decimal(10, 2)
+  gstRate            Decimal          @default(18) @db.Decimal(5, 2)
+  stock              Int              @default(0)
+  city               String?
+  imageUrl           String?
+  images             String[]         @default([])
   // Product-detail-page fields — everything the customer-facing product
   // page shows beyond the core listing info above.
-  sku              String?          @unique
-  oemPartNumber    String?
-  productType      String?
-  specifications   Json             @default("[]")
-  compatibleVehicles Json           @default("[]")
-  searchTags       String[]         @default([])
-  features         String[]         @default([])
-  packageContents  String[]         @default([])
-  material         String?
-  finish           String?
-  packIncludes     String?
-  weightKg         Decimal?         @db.Decimal(6, 3)
-  warrantyMonths   Int?
-  countryOfOrigin  String?
+  sku                String?          @unique
+  oemPartNumber      String?
+  productType        String?
+  specifications     Json             @default("[]")
+  compatibleVehicles Json             @default("[]")
+  searchTags         String[]         @default([])
+  features           String[]         @default([])
+  packageContents    String[]         @default([])
+  material           String?
+  finish             String?
+  packIncludes       String?
+  weightKg           Decimal?         @db.Decimal(6, 3)
+  warrantyMonths     Int?
+  countryOfOrigin    String?
   // Deprecated: historical manual value. Customer ratings come only from ProductReview.
-  rating           Decimal?         @db.Decimal(2, 1)
-  deliveryDaysMin  Int?
-  deliveryDaysMax  Int?
-  offerLabel       String?
-  compatibleModels String[]         @default([])
-  status           ListingStatus    @default(ACTIVE)
-  searchSynced     Boolean          @default(false)
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
-  seller           SellerProfile?   @relation(fields: [sellerId], references: [id], onDelete: SetNull)
-  orderItems       OrderItem[]
-  productReviews   ProductReview[]
+  rating             Decimal?         @db.Decimal(2, 1)
+  deliveryDaysMin    Int?
+  deliveryDaysMax    Int?
+  offerLabel         String?
+  compatibleModels   String[]         @default([])
+  status             ListingStatus    @default(ACTIVE)
+  searchSynced       Boolean          @default(false)
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  seller             SellerProfile?   @relation(fields: [sellerId], references: [id], onDelete: SetNull)
+  orderItems         OrderItem[]
+  productReviews     ProductReview[]
 
   @@index([category])
   @@index([brand])
@@ -225,81 +225,82 @@ model BikePartListing {
 }
 
 model Order {
-  id                String        @id @default(cuid())
-  buyerId           String?
-  customerName      String
-  customerPhone     String
-  status            OrderStatus   @default(PENDING)
-  itemsTotal        Decimal       @db.Decimal(10, 2)
-  taxAmount         Decimal       @default(0) @db.Decimal(10, 2)
-  deliveryCharge    Decimal       @default(0) @db.Decimal(10, 2)
-  discount          Decimal       @default(0) @db.Decimal(10, 2)
-  amount            Decimal       @db.Decimal(10, 2)
-  paymentStatus     PaymentStatus @default(PENDING)
-  razorpayOrderId   String?        @unique
-  razorpayPaymentId String?        @unique
-  razorpaySignature String?
-  porterOrderId     String?
-  porterStatus      String?
-  porterTrackingUrl String?
-  porterReconciliationRequired Boolean @default(false)
-  porterLastError   String?
-  porterAttemptedAt DateTime?
-  deliveryAddress   Json
-  bikeLabel         String?
-  adminNote         String?
+  id                                 String           @id @default(cuid())
+  buyerId                            String?
+  customerName                       String
+  customerPhone                      String
+  status                             OrderStatus      @default(PENDING)
+  itemsTotal                         Decimal          @db.Decimal(10, 2)
+  taxAmount                          Decimal          @default(0) @db.Decimal(10, 2)
+  deliveryCharge                     Decimal          @default(0) @db.Decimal(10, 2)
+  discount                           Decimal          @default(0) @db.Decimal(10, 2)
+  amount                             Decimal          @db.Decimal(10, 2)
+  paymentStatus                      PaymentStatus    @default(PENDING)
+  razorpayOrderId                    String?          @unique
+  razorpayPaymentId                  String?          @unique
+  razorpaySignature                  String?
+  porterOrderId                      String?
+  porterStatus                       String?
+  porterTrackingUrl                  String?
+  porterReconciliationRequired       Boolean          @default(false)
+  porterLastError                    String?
+  porterAttemptedAt                  DateTime?
+  deliveryAddress                    Json
+  bikeLabel                          String?
+  adminNote                          String?
   // Refund request lifecycle — see RefundStatus. `refundAmount` is set once a
   // request is made (defaults to the full order amount; always a full refund
   // in this app today, no partial-refund UI yet) and stays fixed through to
   // REFUNDED so the amount actually sent to Razorpay is always what's shown,
   // even if the order's own `amount` were ever edited afterward.
-  refundStatus      RefundStatus  @default(NONE)
-  refundReason      String?
-  refundAdminNote   String?
-  refundAmount      Decimal?      @db.Decimal(10, 2)
-  razorpayRefundId  String?        @unique
-  refundAttemptedAt DateTime?
-  refundFailureReason String?
-  refundReconciliationRequired Boolean @default(false)
-  refundRequestedAt DateTime?
-  refundProcessedAt DateTime?
+  refundStatus                       RefundStatus     @default(NONE)
+  refundReason                       String?
+  refundAdminNote                    String?
+  refundAmount                       Decimal?         @db.Decimal(10, 2)
+  razorpayRefundId                   String?          @unique
+  refundAttemptedAt                  DateTime?
+  refundFailureReason                String?
+  refundReconciliationRequired       Boolean          @default(false)
+  refundRequestedAt                  DateTime?
+  refundProcessedAt                  DateTime?
   // Product return lifecycle — see ReturnStatus. returnPorterOrderId/Status/
   // TrackingUrl track the reverse pickup shipment, kept separate from the
   // forward-delivery porter* fields above since a delivered order that's
   // now being returned needs both trails visible independently.
-  returnStatus            ReturnStatus @default(NONE)
-  returnReason            String?
-  returnAdminNote         String?
-  returnRequestedAt       DateTime?
-  returnPorterOrderId     String?
-  returnPorterStatus      String?
-  returnPorterTrackingUrl String?
+  returnStatus                       ReturnStatus     @default(NONE)
+  returnReason                       String?
+  returnAdminNote                    String?
+  returnRequestedAt                  DateTime?
+  returnPorterOrderId                String?
+  returnPorterStatus                 String?
+  returnPorterTrackingUrl            String?
   // Mirrors porterReconciliationRequired/porterLastError/porterAttemptedAt
   // above — same uncertain-outcome safety model, applied to the reverse
   // pickup instead of the forward delivery (see dispatchReturnPickupAction).
-  returnPorterReconciliationRequired Boolean @default(false)
-  returnPorterLastError   String?
-  returnPorterAttemptedAt DateTime?
-  returnReceivedAt        DateTime?
+  returnPorterReconciliationRequired Boolean          @default(false)
+  returnPorterLastError              String?
+  returnPorterAttemptedAt            DateTime?
+  returnReceivedAt                   DateTime?
   // Set by the admin at "mark received" time — only RESELLABLE can ever
   // restore stock (see markReturnReceived / returnStockRestored below).
-  returnCondition         ReturnCondition?
+  returnCondition                    ReturnCondition?
   // Idempotency guard: true once BikePartListing.stock has actually been
   // incremented for this return, so a repeated click (or a retried request)
   // can never double-restock the same returned unit.
-  returnStockRestored     Boolean @default(false)
+  returnStockRestored                Boolean          @default(false)
   // True while this order is currently holding a stock reservation (decremented
   // from ProductStock at checkout, not yet released back). Flipped back to
   // false once the reservation is released — payment failed/expired, or the
   // Razorpay order could never be created — so it's never released twice.
   // Left true forever once a sale completes (the stock was genuinely consumed).
-  stockReserved     Boolean       @default(false)
-  createdAt         DateTime      @default(now())
-  updatedAt         DateTime      @updatedAt
-  buyer             User?         @relation(fields: [buyerId], references: [id])
-  items             OrderItem[]
-  events            OrderEvent[]
-  productReviews    ProductReview[]
+  stockReserved                      Boolean          @default(false)
+  createdAt                          DateTime         @default(now())
+  updatedAt                          DateTime         @updatedAt
+  buyer                              User?            @relation(fields: [buyerId], references: [id])
+  items                              OrderItem[]
+  events                             OrderEvent[]
+  productReviews                     ProductReview[]
+  orderReturns                       OrderReturn[]
 
   @@index([status])
   @@index([customerPhone])
@@ -308,22 +309,23 @@ model Order {
 }
 
 model OrderItem {
-  id                String           @id @default(cuid())
-  orderId           String
-  listingId         String?
+  id               String            @id @default(cuid())
+  orderId          String
+  listingId        String?
   // Id of the matching entry in the storefront's static catalog (see
   // lib/storefront-stock.ts) — separate from `listingId`, which points at an
   // admin-managed BikePartListing row instead. Used to release/track stock
   // reservations for this line item; null for anything that doesn't match a
   // known catalog id (defensive — checkout should always set it today).
-  catalogProductId  String?
-  productName       String
-  productImage      String?
-  quantity          Int
-  unitPrice         Decimal          @db.Decimal(10, 2)
-  order             Order            @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  listing           BikePartListing? @relation(fields: [listingId], references: [id], onDelete: SetNull)
-  productReviews    ProductReview[]
+  catalogProductId String?
+  productName      String
+  productImage     String?
+  quantity         Int
+  unitPrice        Decimal           @db.Decimal(10, 2)
+  order            Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  listing          BikePartListing?  @relation(fields: [listingId], references: [id], onDelete: SetNull)
+  productReviews   ProductReview[]
+  returnItems      OrderReturnItem[]
 }
 
 model ProductReview {
@@ -348,6 +350,107 @@ model ProductReview {
   @@index([orderItemId])
 }
 
+// Item/quantity-level return lifecycle — see OrderReturn below. Deliberately
+// separate from ReturnStatus (the pre-existing whole-order return enum on
+// Order): the two systems run in parallel by design (see the migration note
+// on OrderReturn), so a status name collision would be confusing even though
+// the values happen to line up.
+enum OrderReturnStatus {
+  REQUESTED
+  APPROVED
+  PICKUP_SCHEDULED
+  PICKED_UP
+  RECEIVED
+  REJECTED
+}
+
+// Money side of one OrderReturn, independent of OrderReturnStatus (the
+// physical side) — mirrors RefundStatus's shape. A return only ever reaches
+// REQUESTED here once RECEIVED (see markPartialReturnReceived), and an
+// admin still has to explicitly trigger the actual Razorpay call from
+// there — never automatic — same human-in-the-loop step the existing
+// whole-order refund flow already requires.
+enum OrderReturnRefundStatus {
+  NONE
+  REQUESTED
+  PROCESSING
+  REFUNDED
+  FAILED
+}
+
+// Item- and quantity-level return request, introduced alongside (not
+// replacing) Order's pre-existing whole-order return* fields — see the
+// migration note there. One order can have many OrderReturns, each with its
+// own independent lifecycle and its own Porter pickup and refund (Razorpay
+// supports multiple partial refunds against one payment, so each return
+// gets its own razorpayRefundId rather than sharing Order's single one).
+model OrderReturn {
+  id                           String                  @id @default(cuid())
+  orderId                      String
+  status                       OrderReturnStatus       @default(REQUESTED)
+  reason                       String
+  adminNote                    String?
+  requestedAt                  DateTime                @default(now())
+  approvedAt                   DateTime?
+  receivedAt                   DateTime?
+  // Set once, at "mark received" time — see ReturnCondition (shared with the
+  // legacy whole-order return flow). Only RESELLABLE ever restores stock.
+  condition                    ReturnCondition?
+  // Reverse-pickup Porter state, scoped to THIS return — the Porter request
+  // reference used is `return-{this.id}`, never `return-{orderId}`, so two
+  // returns on the same order can never collide on one Porter shipment. Same
+  // DISPATCHING-placeholder + reconciliation-required safety model as the
+  // legacy flow's returnPorter* fields on Order (see order-returns/service.ts).
+  porterOrderId                String?
+  porterStatus                 String?
+  porterTrackingUrl            String?
+  porterReconciliationRequired Boolean                 @default(false)
+  porterLastError              String?
+  porterAttemptedAt            DateTime?
+  // Money side — see OrderReturnRefundStatus. refundAmount is computed from
+  // OrderReturnItem quantities × the historical OrderItem.unitPrice at
+  // receive time (never current BikePartListing.price), and is capped so
+  // the sum of refundAmount across every REFUNDED OrderReturn on one order
+  // can never exceed that order's paid amount.
+  refundStatus                 OrderReturnRefundStatus @default(NONE)
+  refundAmount                 Decimal?                @db.Decimal(10, 2)
+  razorpayRefundId             String?                 @unique
+  refundFailureReason          String?
+  refundReconciliationRequired Boolean                 @default(false)
+  refundAttemptedAt            DateTime?
+  refundProcessedAt            DateTime?
+  createdAt                    DateTime                @default(now())
+  updatedAt                    DateTime                @updatedAt
+
+  order Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  items OrderReturnItem[]
+
+  @@index([orderId])
+  @@index([status])
+}
+
+model OrderReturnItem {
+  id            String  @id @default(cuid())
+  returnId      String
+  orderItemId   String
+  // Never the full OrderItem.quantity by assumption — always validated
+  // against the *remaining* returnable quantity (purchased minus every
+  // non-REJECTED OrderReturnItem already recorded for this orderItemId) at
+  // request time, inside a row-locked transaction (see requestPartialReturn).
+  quantity      Int
+  // Idempotency guard, same pattern as the legacy flow's
+  // Order.returnStockRestored — true once BikePartListing.stock has
+  // actually been incremented for this specific line, so a repeated "mark
+  // received" can never double-restock it.
+  stockRestored Boolean @default(false)
+
+  orderReturn OrderReturn @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  orderItem   OrderItem   @relation(fields: [orderItemId], references: [id], onDelete: Restrict)
+
+  @@unique([returnId, orderItemId])
+  @@index([orderItemId])
+}
+
 // Live remaining stock for the storefront's static product catalog (see
 // lib/storefront-stock.ts for the canonical list of ids/names this tracks).
 // Separate from BikePartListing.stock, which is the admin-managed catalog's
@@ -369,18 +472,18 @@ model OrderEvent {
 }
 
 model WebhookEvent {
-  id                   String                 @id @default(cuid())
-  provider             String
-  eventId              String
-  eventType            String
-  payloadHash          String?
-  status               WebhookProcessingStatus @default(PROCESSING)
-  attempts             Int                    @default(1)
-  lastError            String?
-  processingStartedAt  DateTime?
-  processedAt          DateTime?
-  createdAt            DateTime               @default(now())
-  updatedAt            DateTime               @updatedAt
+  id                  String                  @id @default(cuid())
+  provider            String
+  eventId             String
+  eventType           String
+  payloadHash         String?
+  status              WebhookProcessingStatus @default(PROCESSING)
+  attempts            Int                     @default(1)
+  lastError           String?
+  processingStartedAt DateTime?
+  processedAt         DateTime?
+  createdAt           DateTime                @default(now())
+  updatedAt           DateTime                @updatedAt
 
   @@unique([provider, eventId])
   @@index([status, processingStartedAt])

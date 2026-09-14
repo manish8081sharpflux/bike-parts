@@ -33,6 +33,19 @@ import {
   rejectReturn,
   type ReturnCondition,
 } from "@/lib/order-return-state";
+import {
+  approvePartialReturn,
+  applyPartialReturnPorterStatus,
+  claimPartialRefundRequest,
+  claimPartialReturnPickupDispatch,
+  completePartialReturnPickupDispatch,
+  failPartialReturnPickupDispatch,
+  markPartialRefundFailed,
+  markPartialRefundNeedsReconciliation,
+  markPartialRefundSucceeded,
+  markPartialReturnReceived,
+  rejectPartialReturn,
+} from "@/lib/order-returns/service";
 import type { OrderStatus } from "@prisma/client";
 
 const ORDER_STATUSES: OrderStatus[] = [
@@ -499,4 +512,257 @@ export async function markReturnReceivedAction(orderId: string, formData: FormDa
   revalidatePath("/admin/orders");
   revalidatePath("/admin/returns");
   redirect(`/admin/orders/${orderId}?refundReady=1`);
+}
+
+// ---------------------------------------------------------------------------
+// Item/quantity-level returns (OrderReturn) — see lib/order-returns/service.ts.
+// Each action below is scoped to one returnId, not the whole order, so one
+// order can have several returns moving through their lifecycles
+// independently (e.g. Return #1 RECEIVED while Return #2 is still REQUESTED).
+// `orderId` is only used to redirect back to the right order detail page.
+// ---------------------------------------------------------------------------
+
+/** Approves a pending partial return — next step is dispatching a reverse pickup for it. */
+export async function approvePartialReturnAction(orderId: string, returnId: string, formData: FormData) {
+  await requireAdminAction();
+  const adminNote = String(formData.get("returnAdminNote") ?? "").trim();
+
+  const approved = await approvePartialReturn(returnId, adminNote);
+  if (!approved) redirect(`/admin/orders/${orderId}?error=${encodeURIComponent("This return is not pending approval.")}`);
+
+  revalidatePath(`/admin/orders/${orderId}`);
+  revalidatePath("/admin/orders");
+  revalidatePath("/admin/returns");
+}
+
+/** Rejects a pending partial return — the returned quantity becomes returnable again since REJECTED rows are excluded from the "already returned" sum. */
+export async function rejectPartialReturnAction(orderId: string, returnId: string, formData: FormData) {
+  await requireAdminAction();
+  const adminNote = String(formData.get("returnAdminNote") ?? "").trim();
+  if (!adminNote) {
+    redirect(`/admin/orders/${orderId}?error=${encodeURIComponent("A note is required so the customer knows why.")}`);
+  }
+
+  const rejected = await rejectPartialReturn(returnId, adminNote);
+  if (!rejected) redirect(`/admin/orders/${orderId}?error=${encodeURIComponent("This return is not pending approval.")}`);
+
+  revalidatePath(`/admin/orders/${orderId}`);
+  revalidatePath("/admin/orders");
+  revalidatePath("/admin/returns");
+}
+
+/**
+ * Dispatches a reverse Porter pickup for one approved partial return. Uses
+ * `return-{returnId}` as the Porter request reference (never
+ * `return-{orderId}`) so multiple returns on the same order never collide on
+ * one Porter shipment.
+ */
+export async function dispatchPartialReturnPickupAction(orderId: string, returnId: string) {
+  await requireAdminAction();
+  let claimed = false;
+
+  try {
+    const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
+    const orderReturn = await prisma.orderReturn.findUniqueOrThrow({ where: { id: returnId } });
+
+    if (orderReturn.orderId !== orderId) throw new Error("This return does not belong to this order.");
+    if (orderReturn.status !== "APPROVED") throw new Error("This return has not been approved yet.");
+    if (orderReturn.porterReconciliationRequired) {
+      throw new Error("Pickup outcome is uncertain. Verify the pickup with Porter before dispatching again.");
+    }
+    if (orderReturn.porterOrderId) throw new Error("A pickup has already been dispatched for this return.");
+    assertPorterConfigured();
+    if (
+      process.env.NODE_ENV === "production" &&
+      (!process.env.WAREHOUSE_CONTACT_NAME ||
+        !process.env.WAREHOUSE_PHONE ||
+        !process.env.WAREHOUSE_ADDRESS_LINE1 ||
+        !process.env.WAREHOUSE_CITY ||
+        !/^\d{6}$/.test(process.env.WAREHOUSE_PINCODE ?? ""))
+    ) {
+      throw new Error("Production warehouse configuration is incomplete.");
+    }
+
+    const address = (order.deliveryAddress ?? {}) as DeliveryAddress;
+    const line1 = [address.flatNo, address.floor, address.area].filter(Boolean).join(", ");
+    const pickupPhone = address.phone || order.customerPhone;
+    if (!order.customerName.trim() || !/^\d{10}$/.test(pickupPhone) || !line1 || !address.city || !/^\d{6}$/.test(address.pincode ?? "")) {
+      throw new Error("Delivery address is incomplete. Contact name, phone, address, city, and pincode are required.");
+    }
+
+    if (!(await claimPartialReturnPickupDispatch(returnId))) {
+      throw new Error("A pickup has already been dispatched for this return.");
+    }
+    claimed = true;
+
+    const result = await createPorterDelivery({
+      orderId: `return-${returnId}`,
+      pickup: {
+        contactName: address.contactName || order.customerName,
+        contactPhone: pickupPhone,
+        line1,
+        line2: address.landmark ?? "",
+        city: address.city ?? "",
+        pincode: address.pincode ?? "",
+      },
+      drop: {
+        contactName: process.env.WAREHOUSE_CONTACT_NAME!,
+        contactPhone: process.env.WAREHOUSE_PHONE!,
+        line1: process.env.WAREHOUSE_ADDRESS_LINE1!,
+        city: process.env.WAREHOUSE_CITY!,
+        pincode: process.env.WAREHOUSE_PINCODE!,
+      },
+      amount: Number(order.amount),
+      instructions: `Return #${returnId.slice(-6)} pickup for Deep Automobiles order ${order.id}`,
+    });
+
+    if (!result.porterOrderId) {
+      throw new PorterRequestError("Porter returned no delivery identifier; reconciliation is required.", { uncertain: true });
+    }
+
+    if (!(await completePartialReturnPickupDispatch(returnId, result))) {
+      throw new Error("Return pickup claim is no longer current.");
+    }
+  } catch (error) {
+    console.error("[porter] Partial return pickup dispatch failed for return", returnId, error);
+    if (claimed) {
+      const failureMessage = error instanceof Error ? error.message : "Could not dispatch this return pickup.";
+      const uncertain = error instanceof PorterRequestError && error.uncertain;
+      await failPartialReturnPickupDispatch(returnId, failureMessage, uncertain).catch((dbError) => {
+        console.error("[porter] Also failed to record partial-return-dispatch-failed state for return", returnId, dbError);
+      });
+    }
+    const message = error instanceof Error ? error.message : "Could not dispatch this return pickup.";
+    redirect(`/admin/orders/${orderId}?error=${encodeURIComponent(message)}`);
+  }
+
+  revalidatePath(`/admin/orders/${orderId}`);
+  revalidatePath("/admin/orders");
+  revalidatePath("/admin/returns");
+}
+
+/** Polls Porter for one partial return's pickup shipment and applies the latest status. */
+export async function refreshPartialReturnPickupStatusAction(orderId: string, returnId: string) {
+  await requireAdminAction();
+
+  try {
+    const orderReturn = await prisma.orderReturn.findUniqueOrThrow({ where: { id: returnId } });
+    if (orderReturn.orderId !== orderId) throw new Error("This return does not belong to this order.");
+    if (orderReturn.porterReconciliationRequired) {
+      throw new Error("Pickup outcome is uncertain. Verify the pickup with Porter before refreshing status.");
+    }
+    if (!orderReturn.porterOrderId || orderReturn.porterOrderId === "DISPATCHING") {
+      throw new Error("This return has not been dispatched for pickup yet.");
+    }
+
+    const { status } = await getPorterDeliveryStatus(orderReturn.porterOrderId);
+    await applyPartialReturnPorterStatus(returnId, status);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not refresh pickup status.";
+    console.error("[porter] Partial return pickup status refresh failed for return", returnId, error);
+    redirect(`/admin/orders/${orderId}?error=${encodeURIComponent(message)}`);
+  }
+
+  revalidatePath(`/admin/orders/${orderId}`);
+  revalidatePath("/admin/orders");
+  revalidatePath("/admin/returns");
+}
+
+/**
+ * Admin confirms this return's item(s) are physically back at the warehouse
+ * and chooses a condition — only RESELLABLE restores stock, and only for the
+ * quantities on this specific return (see markPartialReturnReceived).
+ * Automatically requests this return's own refund.
+ */
+export async function markPartialReturnReceivedAction(orderId: string, returnId: string, formData: FormData) {
+  await requireAdminAction();
+  const adminNote = String(formData.get("returnAdminNote") ?? "").trim();
+  const conditionRaw = String(formData.get("returnCondition") ?? "");
+  if (conditionRaw !== "RESELLABLE" && conditionRaw !== "DAMAGED") {
+    redirect(`/admin/orders/${orderId}?error=${encodeURIComponent("Choose whether the returned item(s) are resellable or damaged before marking this return received.")}`);
+  }
+
+  const { received } = await markPartialReturnReceived(returnId, adminNote, conditionRaw as ReturnCondition);
+  if (!received) {
+    redirect(`/admin/orders/${orderId}?error=${encodeURIComponent("This return is not ready to be marked received.")}`);
+  }
+
+  revalidatePath(`/admin/orders/${orderId}`);
+  revalidatePath("/admin/orders");
+  revalidatePath("/admin/returns");
+  redirect(`/admin/orders/${orderId}?refundReady=1`);
+}
+
+/**
+ * Approves one return's pending refund — moves money via Razorpay for just
+ * this return's amount, using createRazorpayRefund's existing
+ * amountInPaise parameter (already supports partial amounts). Never touches
+ * Order.status/paymentStatus — a partial return is not a whole-order
+ * cancellation.
+ */
+export async function approvePartialRefundAction(orderId: string, returnId: string, formData: FormData) {
+  await requireAdminAction();
+  const adminNote = String(formData.get("refundAdminNote") ?? "").trim();
+
+  try {
+    if (!isRazorpayConfigured()) {
+      throw new Error("Razorpay is not configured. Set RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET in .env.local.");
+    }
+
+    const claim = await claimPartialRefundRequest(returnId, adminNote);
+    if (!claim.claimed || !claim.paymentId || claim.amount === undefined) {
+      throw new Error("This return has no pending refund request, or refunding it would exceed the order's paid amount.");
+    }
+
+    const refund = await createRazorpayRefund({
+      paymentId: claim.paymentId,
+      amountInPaise: Math.round(claim.amount * 100),
+      notes: { orderId, returnId },
+    });
+    await markPartialRefundSucceeded(returnId, refund.id);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not process this refund.";
+    console.error("[refund] Partial refund approval failed for return", returnId, error);
+    if (error instanceof Error && /timeout|timed out|network|socket|ECONNRESET|ETIMEDOUT/i.test(error.message)) {
+      await markPartialRefundNeedsReconciliation(returnId, message).catch((dbError) => {
+        console.error("[refund] Also failed to record reconciliation-needed state for return", returnId, dbError);
+      });
+    } else if (!message.startsWith("This return has no pending refund request")) {
+      await markPartialRefundFailed(returnId, message).catch((dbError) => {
+        console.error("[refund] Also failed to record refund-failed state for return", returnId, dbError);
+      });
+    }
+    redirect(`/admin/orders/${orderId}?error=${encodeURIComponent(message)}`);
+  }
+
+  revalidatePath(`/admin/orders/${orderId}`);
+  revalidatePath("/admin/orders");
+  revalidatePath("/admin/returns");
+}
+
+/** Rejects one return's pending refund request — no money moves, just records why. */
+export async function rejectPartialRefundAction(orderId: string, returnId: string, formData: FormData) {
+  await requireAdminAction();
+  const adminNote = String(formData.get("refundAdminNote") ?? "").trim();
+  if (!adminNote) {
+    redirect(`/admin/orders/${orderId}?error=${encodeURIComponent("A note is required so the customer knows why.")}`);
+  }
+
+  const rejected = await prisma.$transaction(async (tx) => {
+    const claim = await tx.orderReturn.updateMany({
+      where: { id: returnId, refundStatus: "REQUESTED" },
+      data: { refundStatus: "FAILED", refundFailureReason: adminNote },
+    });
+    if (claim.count !== 1) return false;
+    await tx.orderEvent.create({
+      data: { orderId, type: "PARTIAL_REFUND_REJECTED", message: `Refund for return #${returnId.slice(-6)} rejected — ${adminNote}` },
+    });
+    return true;
+  });
+
+  if (!rejected) redirect(`/admin/orders/${orderId}?error=${encodeURIComponent("This return has no pending refund request.")}`);
+
+  revalidatePath(`/admin/orders/${orderId}`);
+  revalidatePath("/admin/orders");
+  revalidatePath("/admin/returns");
 }

@@ -17,6 +17,7 @@ import {
 } from "@/lib/actions/admin-orders";
 import { RefundReadyPopup } from "./RefundReadyPopup";
 import { ActivityLog } from "./ActivityLog";
+import { PartialReturnsSection } from "./PartialReturnsSection";
 
 export const dynamic = "force-dynamic";
 
@@ -67,6 +68,7 @@ export default async function AdminOrderDetailPage({
     include: {
       items: true,
       events: { orderBy: { createdAt: "desc" } },
+      orderReturns: { include: { items: true }, orderBy: { createdAt: "asc" } },
     },
   });
 
@@ -376,6 +378,33 @@ export default async function AdminOrderDetailPage({
               )}
             </div>
           ) : null}
+
+          <PartialReturnsSection
+            orderId={order.id}
+            orderReturns={order.orderReturns.map((orderReturn) => ({
+              id: orderReturn.id,
+              status: orderReturn.status,
+              reason: orderReturn.reason,
+              adminNote: orderReturn.adminNote,
+              condition: orderReturn.condition,
+              porterOrderId: orderReturn.porterOrderId,
+              porterStatus: orderReturn.porterStatus,
+              porterTrackingUrl: orderReturn.porterTrackingUrl,
+              porterReconciliationRequired: orderReturn.porterReconciliationRequired,
+              porterLastError: orderReturn.porterLastError,
+              refundStatus: orderReturn.refundStatus,
+              refundAmount: orderReturn.refundAmount === null ? null : Number(orderReturn.refundAmount),
+              refundFailureReason: orderReturn.refundFailureReason,
+              razorpayRefundId: orderReturn.razorpayRefundId,
+              refundProcessedAt: orderReturn.refundProcessedAt,
+              receivedAt: orderReturn.receivedAt,
+              items: orderReturn.items.map((line) => ({
+                orderItemId: line.orderItemId,
+                quantity: line.quantity,
+                productName: order.items.find((item) => item.id === line.orderItemId)?.productName ?? "Item",
+              })),
+            }))}
+          />
 
           {order.refundStatus !== "NONE" ? (
             <div className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-zinc-100">

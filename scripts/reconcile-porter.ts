@@ -51,13 +51,40 @@ async function main() {
     orderBy: { returnPorterAttemptedAt: "asc" },
   });
 
+  // Item/quantity-level return pickups (see lib/order-returns/service.ts) —
+  // each OrderReturn has its own independent Porter state, separate from the
+  // legacy whole-order returnPorter* fields above, so this needs its own
+  // query rather than being folded into reversePickups.
+  const partialReturnPickups = await prisma.orderReturn.findMany({
+    where: {
+      OR: [
+        { porterReconciliationRequired: true },
+        { porterOrderId: "DISPATCHING", porterAttemptedAt: { lt: cutoff } },
+      ],
+    },
+    select: {
+      id: true,
+      orderId: true,
+      status: true,
+      porterOrderId: true,
+      porterStatus: true,
+      porterAttemptedAt: true,
+      porterLastError: true,
+      porterReconciliationRequired: true,
+    },
+    orderBy: { porterAttemptedAt: "asc" },
+  });
+
   console.log(`\nForward deliveries needing reconciliation (${forwardDeliveries.length}):`);
   console.table(forwardDeliveries);
 
   console.log(`\nReverse (return) pickups needing reconciliation (${reversePickups.length}):`);
   console.table(reversePickups);
 
-  const total = forwardDeliveries.length + reversePickups.length;
+  console.log(`\nItem/quantity-level return pickups needing reconciliation (${partialReturnPickups.length}):`);
+  console.table(partialReturnPickups);
+
+  const total = forwardDeliveries.length + reversePickups.length + partialReturnPickups.length;
   console.log(`\nFound ${total} Porter reconciliation candidate(s) total. Read-only report; no state was changed.`);
   if (total > 0) process.exitCode = 1;
 }

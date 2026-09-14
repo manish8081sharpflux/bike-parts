@@ -364,6 +364,9 @@ export function OrderDetailView({
   onRequestReturn,
   isRequestingReturn,
   returnRequestError,
+  onRequestPartialReturn,
+  isRequestingPartialReturn,
+  partialReturnError,
   onCancelOrder,
   isCancellingOrder,
   cancelOrderError,
@@ -375,6 +378,10 @@ export function OrderDetailView({
   onRequestReturn: (reason: string) => void;
   isRequestingReturn: boolean;
   returnRequestError: string | null;
+  /** Submits an item/quantity-level return request. Resolves true only once the server has actually accepted it. */
+  onRequestPartialReturn: (reason: string, lines: Array<{ orderItemId: string; quantity: number }>) => Promise<boolean>;
+  isRequestingPartialReturn: boolean;
+  partialReturnError: string | null;
   /** Cancels this order outright — a paid order's refund is then requested automatically, no separate step needed. */
   onCancelOrder: () => void;
   isCancellingOrder: boolean;
@@ -382,6 +389,9 @@ export function OrderDetailView({
 }) {
   const [isReturnFormOpen, setIsReturnFormOpen] = useState(false);
   const [returnReasonDraft, setReturnReasonDraft] = useState("");
+  const [isPartialReturnFormOpen, setIsPartialReturnFormOpen] = useState(false);
+  const [partialReturnReasonDraft, setPartialReturnReasonDraft] = useState("");
+  const [partialReturnQuantities, setPartialReturnQuantities] = useState<Record<string, number>>({});
   const [isCancelConfirmOpen, setIsCancelConfirmOpen] = useState(false);
   const currentStepIndex = stepIndexForStatus[order.status];
   const isOutForDelivery = order.status === "out_for_delivery";
@@ -611,6 +621,154 @@ export function OrderDetailView({
                   )}
                 </>
               )}
+            </div>
+          ) : null}
+
+          {/*
+            Item Returns card — return only specific items/quantities from
+            this order instead of the whole thing (see the legacy Return card
+            above, which still returns everything). Each request becomes its
+            own independent OrderReturn with its own status; the "already
+            returned" quantity per item comes from the server
+            (remainingReturnable), never computed client-side, since only the
+            server's row-locked check is authoritative.
+          */}
+          {order.isPaid && (isDelivered || order.partialReturns.length > 0) ? (
+            <div className="rounded-xl border border-zinc-100 bg-white p-5 shadow-sm">
+              <h3 className="flex items-center gap-2 text-sm font-black text-[#070e2b]">
+                <RotateCw className="size-4.5 text-zinc-500" />
+                Item Returns
+              </h3>
+
+              {order.partialReturns.map((partialReturn, index) => (
+                <div key={partialReturn.id} className="mt-3 rounded-lg border border-zinc-100 bg-zinc-50 px-4 py-3 text-xs">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-black text-[#070e2b]">Return #{index + 1}</span>
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-[10px] font-black uppercase tracking-wide ${
+                        partialReturn.status === "received"
+                          ? "bg-emerald-100 text-emerald-700"
+                          : partialReturn.status === "rejected"
+                          ? "bg-red-100 text-red-700"
+                          : "bg-amber-100 text-amber-800"
+                      }`}
+                    >
+                      {partialReturn.status.replace(/_/g, " ")}
+                    </span>
+                  </div>
+                  <p className="mt-1 font-medium text-zinc-600">
+                    {partialReturn.items.map((line) => `${line.productName} × ${line.quantity}`).join(", ")}
+                  </p>
+                  {partialReturn.status === "rejected" && partialReturn.adminNote ? (
+                    <p className="mt-1 font-medium text-red-600">{partialReturn.adminNote}</p>
+                  ) : null}
+                  {partialReturn.porterTrackingUrl && (partialReturn.status === "pickup_scheduled" || partialReturn.status === "picked_up") ? (
+                    <a href={partialReturn.porterTrackingUrl} target="_blank" rel="noreferrer" className="mt-1 inline-block font-bold text-blue-700 underline">
+                      Track pickup ↗
+                    </a>
+                  ) : null}
+                  {partialReturn.refundStatus !== "none" ? (
+                    <p className="mt-1 font-bold text-zinc-700">
+                      Refund: {partialReturn.refundStatus === "refunded" ? `₹${formatPrice(partialReturn.refundAmount ?? 0)} refunded` : partialReturn.refundStatus}
+                    </p>
+                  ) : null}
+                </div>
+              ))}
+
+              {isDelivered ? (
+                isPartialReturnFormOpen ? (
+                  <div className="mt-3 flex flex-col gap-3">
+                    <div className="space-y-2">
+                      {order.items
+                        .filter((item) => (item.remainingReturnable ?? 0) > 0)
+                        .map((item) => {
+                          const max = item.remainingReturnable ?? 0;
+                          const key = item.orderItemId ?? item.product.name;
+                          const selected = partialReturnQuantities[key] ?? 0;
+                          return (
+                            <div key={key} className="flex items-center justify-between gap-2 rounded-lg border border-zinc-200 px-3 py-2">
+                              <div className="min-w-0">
+                                <p className="truncate text-xs font-bold text-[#070e2b]">{item.product.name}</p>
+                                <p className="text-[10px] text-zinc-500">{max} of {item.quantity} eligible to return</p>
+                              </div>
+                              <div className="flex shrink-0 items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => setPartialReturnQuantities((prev) => ({ ...prev, [key]: Math.max(0, (prev[key] ?? 0) - 1) }))}
+                                  disabled={selected <= 0}
+                                  className="grid size-6 place-items-center rounded-full border border-zinc-200 text-xs font-black text-zinc-600 disabled:opacity-30"
+                                >
+                                  −
+                                </button>
+                                <span className="w-4 text-center text-xs font-black text-[#070e2b]">{selected}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => setPartialReturnQuantities((prev) => ({ ...prev, [key]: Math.min(max, (prev[key] ?? 0) + 1) }))}
+                                  disabled={selected >= max}
+                                  className="grid size-6 place-items-center rounded-full border border-zinc-200 text-xs font-black text-zinc-600 disabled:opacity-30"
+                                >
+                                  +
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                    </div>
+                    <textarea
+                      value={partialReturnReasonDraft}
+                      onChange={(event) => setPartialReturnReasonDraft(event.target.value)}
+                      placeholder="Tell us why you'd like to return these item(s)…"
+                      rows={2}
+                      className="rounded-lg border border-zinc-200 px-3 py-2 text-xs outline-none focus:border-zinc-500"
+                    />
+                    {partialReturnError ? <p className="text-xs font-medium text-red-600">{partialReturnError}</p> : null}
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        disabled={
+                          !partialReturnReasonDraft.trim() ||
+                          isRequestingPartialReturn ||
+                          Object.values(partialReturnQuantities).every((qty) => qty <= 0)
+                        }
+                        onClick={async () => {
+                          const lines = Object.entries(partialReturnQuantities)
+                            .filter(([, qty]) => qty > 0)
+                            .map(([orderItemId, quantity]) => ({ orderItemId, quantity }));
+                          const succeeded = await onRequestPartialReturn(partialReturnReasonDraft.trim(), lines);
+                          if (succeeded) {
+                            setIsPartialReturnFormOpen(false);
+                            setPartialReturnReasonDraft("");
+                            setPartialReturnQuantities({});
+                          }
+                        }}
+                        className="flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg bg-[#ff4b1f] text-xs font-black text-white transition hover:bg-[#e8330e] disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {isRequestingPartialReturn ? <Loader2 className="size-3.5 animate-spin" /> : null}
+                        Submit request
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsPartialReturnFormOpen(false);
+                          setPartialReturnReasonDraft("");
+                          setPartialReturnQuantities({});
+                        }}
+                        className="h-9 rounded-lg border border-zinc-200 px-3 text-xs font-bold text-zinc-600 hover:bg-zinc-50"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : order.items.some((item) => (item.remainingReturnable ?? 0) > 0) ? (
+                  <button
+                    type="button"
+                    onClick={() => setIsPartialReturnFormOpen(true)}
+                    className="mt-3 flex h-9 w-full items-center justify-center gap-1.5 rounded-lg border border-zinc-200 text-xs font-bold text-zinc-700 transition hover:bg-zinc-50"
+                  >
+                    Return specific item(s)
+                  </button>
+                ) : null
+              ) : null}
             </div>
           ) : null}
 
