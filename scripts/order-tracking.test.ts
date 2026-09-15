@@ -100,6 +100,77 @@ test("real executive information is optional and phone links require an actual d
   assert.match(masked, /98XXXXXX12/); assert.ok(!masked.includes("tel:"));
 });
 
+// 6/7. real rider photo, no fake avatar
+test("a real Borzo courier photo renders as-is; without one, only a neutral icon is shown, never generated initials", () => {
+  const withPhoto = render(ShipmentDetails, order({
+    shippingProvider: "BORZO", shippingOrderId: "borzo-1", deliveryExecutiveName: "Rahul Sharma", deliveryExecutivePhotoUrl: "https://borzodelivery.com/photo/1.jpg",
+  }));
+  assert.match(withPhoto, /<img[^>]*src="https:\/\/borzodelivery\.com\/photo\/1\.jpg"/);
+
+  const withoutPhoto = render(ShipmentDetails, order({ shippingProvider: "BORZO", shippingOrderId: "borzo-1", deliveryExecutiveName: "Rahul Sharma" }));
+  assert.ok(!withoutPhoto.includes("<img"));
+  assert.ok(!/[A-Z]{2}<\/span>/.test(withoutPhoto), "must never render generated initials as a fake avatar");
+});
+
+// 21/22. map only displays real coordinates; customer page never shows a fake rider
+test("a live rider map renders only when both real coordinates are present, for Borzo only", () => {
+  const withCoords = render(ShipmentTracking, order({
+    shippingProvider: "BORZO", shippingOrderId: "borzo-1", deliveryExecutiveLatitude: 18.5204, deliveryExecutiveLongitude: 73.8567,
+  }));
+  assert.match(withCoords, /<iframe/); assert.match(withCoords, /18\.5204/); assert.match(withCoords, /73\.8567/);
+  assert.ok(!withCoords.includes("Live courier location is not available yet."));
+
+  const withoutCoords = render(ShipmentTracking, order({ shippingProvider: "BORZO", shippingOrderId: "borzo-1" }));
+  assert.ok(!withoutCoords.includes("<iframe"));
+  assert.match(withoutCoords, /Live courier location is not available yet\./);
+
+  // A Shiprocket order must never render a map even if (hypothetically) a
+  // stray coordinate pair existed on the row — the map is Borzo-only.
+  const shiprocket = render(ShipmentTracking, order({
+    shippingProvider: "SHIPROCKET", shippingOrderId: "sr-1", deliveryExecutiveLatitude: 18.5204, deliveryExecutiveLongitude: 73.8567,
+  }));
+  assert.ok(!shiprocket.includes("<iframe"));
+});
+
+test("only one of latitude/longitude never renders a map or claims a live position", () => {
+  const html = render(ShipmentTracking, order({ shippingProvider: "BORZO", shippingOrderId: "borzo-1", deliveryExecutiveLatitude: 18.5204 }));
+  assert.ok(!html.includes("<iframe"));
+  assert.match(html, /Live courier location is not available yet\./);
+});
+
+// Rider live-state line — Part 12
+test("rider live-state line reflects real signals: assigned-with-location vs assigned-only vs no rider", () => {
+  const onTheWay = render(ShipmentDetails, order({
+    shippingProvider: "BORZO", shippingOrderId: "borzo-1", deliveryExecutiveName: "Rahul Sharma", deliveryExecutiveLatitude: 18.5, deliveryExecutiveLongitude: 73.8,
+  }));
+  assert.match(onTheWay, /Your rider is on the way\./);
+
+  const assignedOnly = render(ShipmentDetails, order({ shippingProvider: "BORZO", shippingOrderId: "borzo-1", deliveryExecutiveName: "Rahul Sharma" }));
+  assert.match(assignedOnly, /Delivery executive assigned\./);
+  assert.ok(!assignedOnly.includes("Your rider is on the way"));
+
+  const noRider = render(ShipmentDetails, order({ shippingProvider: "BORZO", shippingOrderId: "borzo-1" }));
+  assert.match(noRider, /Borzo delivery created\./);
+  assert.ok(!noRider.includes("Delivery Executive"));
+});
+
+// Borzo-specific labels (Part 4/6/13) — no AWB/Shipment ID vocabulary
+test("Borzo shipment details use Borzo-specific labels and never claim an AWB/Shipment ID", () => {
+  const html = render(ShipmentDetails, order({ shippingProvider: "BORZO", shippingOrderId: "BZ-999", shippingCourierName: "Rahul Sharma" }));
+  assert.match(html, /Borzo Order ID/); assert.match(html, /BZ-999/);
+  assert.match(html, /Courier\/Rider/);
+  assert.ok(!html.includes("AWB Number"));
+  assert.ok(!html.includes("Shipment ID"));
+});
+
+test("Borzo tracking button reads 'Track Delivery', Shiprocket keeps 'Track Shipment'", () => {
+  const borzo = render(ShipmentTracking, order({ shippingProvider: "BORZO", shippingOrderId: "BZ-1", shippingTrackingUrl: "https://borzodelivery.com/track/1" }));
+  assert.match(borzo, /Track Delivery/); assert.ok(!borzo.includes("Track Shipment"));
+
+  const shiprocket = render(ShipmentTracking, order({ shippingProvider: "SHIPROCKET", shippingOrderId: "SR-1", shippingTrackingUrl: "https://shiprocket.example/track/1" }));
+  assert.match(shiprocket, /Track Shipment/); assert.ok(!shiprocket.includes("Track Delivery"));
+});
+
 test("timeline recognizes human and enum status messages, never invents missing times", () => {
   const input = order({ status: "delivered", events: [
     { type: "STATUS_CHANGE", message: "Status changed to Preparing", createdAt: placedAt + 1000 },

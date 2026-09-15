@@ -132,6 +132,8 @@ export type LocalDeliveryQuote = {
   provider: ShippingProvider;
   /** Only ever set from a real provider response — null when the provider genuinely didn't return a fee (never fabricated, see Part 8). */
   deliveryFeeAmount: number | null;
+  /** Total amount Borzo would actually charge (may include weight/insurance/COD fees on top of deliveryFeeAmount) — null when not returned. */
+  paymentAmount: number | null;
   /** Only ever set from a real provider response — most local couriers don't return an ETA at quote time; null means "not shown", never a guessed value. */
   estimatedDeliveryAt: string | null;
   raw: unknown;
@@ -141,8 +143,19 @@ export type LocalDeliveryResult = {
   provider: ShippingProvider;
   shippingOrderId: string;
   status: string;
+  /** Borzo's own human-readable description of `status`, when it returned one. */
+  statusDescription: string | null;
+  /** The drop point's real `delivery.status`, when Borzo returned one — see status-mapping.ts. */
+  pointDeliveryStatus: string | null;
   trackingUrl: string | null;
+  /** A real document URL only (Part 20) — optional, never required for the local-delivery workflow. */
+  waybillUrl: string | null;
+  courierId: string | null;
   courierName: string | null;
   courierPhone: string | null;
+  courierPhotoUrl: string | null;
+  /** Only present while a courier is actually assigned and reporting a live position — never derived from an address/pincode/city center (Part 7). */
+  courierLatitude: number | null;
+  courierLongitude: number | null;
   raw: unknown;
 };

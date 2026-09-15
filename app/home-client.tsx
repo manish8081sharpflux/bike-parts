@@ -873,6 +873,10 @@ export function HomeClient({ products }: { products: Product[] }) {
           shippingCourierName: string | null;
           deliveryExecutiveName: string | null;
           deliveryExecutivePhone: string | null;
+          deliveryExecutivePhotoUrl: string | null;
+          deliveryExecutiveLatitude: number | null;
+          deliveryExecutiveLongitude: number | null;
+          shippingWaybillUrl: string | null;
           shippingLastUpdatedAt: string | null;
           shippingEstimatedDeliveryAt: string | null;
           deliveryAddress: Partial<Address> | null;
@@ -989,6 +993,10 @@ export function HomeClient({ products }: { products: Product[] }) {
             shippingCourierName: dbOrder.shippingCourierName,
             deliveryExecutiveName: dbOrder.deliveryExecutiveName,
             deliveryExecutivePhone: dbOrder.deliveryExecutivePhone,
+            deliveryExecutivePhotoUrl: dbOrder.deliveryExecutivePhotoUrl,
+            deliveryExecutiveLatitude: dbOrder.deliveryExecutiveLatitude,
+            deliveryExecutiveLongitude: dbOrder.deliveryExecutiveLongitude,
+            shippingWaybillUrl: dbOrder.shippingWaybillUrl,
             shippingLastUpdatedAt: dbOrder.shippingLastUpdatedAt,
             shippingEstimatedDeliveryAt: dbOrder.shippingEstimatedDeliveryAt,
             refundStatus: mapDbRefundStatus(dbOrder.refundStatus),

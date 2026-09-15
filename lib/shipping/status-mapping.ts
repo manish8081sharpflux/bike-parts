@@ -47,24 +47,32 @@ export function isShiprocketReversePickedUp(raw: string): boolean {
  *   delayed                        -> not mapped (still in progress; never regresses status)
  *   active                         -> SHIPPED (a courier is working the order — Borzo's own docs don't
  *                                     expose a picked-up/en-route split at the order level; see the
- *                                     point-level best-effort check below for a finer OUT_FOR_DELIVERY signal)
+ *                                     hints below for a finer OUT_FOR_DELIVERY signal)
  *   completed                      -> DELIVERED
  *   cancelled                      -> CANCELLED
  *
- * Point-level ("Delivery statuses") strings were never confirmed from the
- * live docs despite repeated attempts (see borzo.ts's header) — the
- * substring checks below are a best-effort OUT_FOR_DELIVERY/DELIVERED
- * upgrade over the coarser order-level status only, verify against a real
- * test-account response before relying on this distinction in production.
+ * The drop point's `delivery.status` (hints.pointStatuses) and whether a
+ * courier is reporting a real live position (hints.courierHasLiveLocation)
+ * are both confirmed real signals — see borzo.ts's BorzoOrderResult and
+ * getCourier — but the exact enumeration of possible point-level status
+ * strings has not been confirmed from official docs, so only a
+ * conservative substring match against a few known phrases is used as an
+ * OUT_FOR_DELIVERY upgrade over the coarser "active" order status.
+ * Anything unrecognized simply isn't upgraded — it never crashes and never
+ * regresses the order.
  */
-export function mapBorzoStatusToOrderStatus(raw: string, pointStatuses: string[] = []): OrderStatus | null {
+export function mapBorzoStatusToOrderStatus(
+  raw: string,
+  hints: { pointStatuses?: string[]; courierHasLiveLocation?: boolean } = {}
+): OrderStatus | null {
   const value = raw.toLowerCase().trim();
   if (value === "cancelled") return "CANCELLED";
   if (value === "completed") return "DELIVERED";
 
-  const points = pointStatuses.map((point) => point.toLowerCase().trim());
+  const points = (hints.pointStatuses ?? []).map((point) => point.toLowerCase().trim());
   if (points.some((point) => point.includes("deliver"))) return "DELIVERED";
   if (value === "active") {
+    if (hints.courierHasLiveLocation) return "OUT_FOR_DELIVERY";
     if (points.some((point) => point.includes("arrived") || point.includes("start") || point.includes("pickup") || point.includes("picked"))) {
       return "OUT_FOR_DELIVERY";
     }

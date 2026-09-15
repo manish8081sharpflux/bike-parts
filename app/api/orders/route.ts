@@ -62,10 +62,17 @@ export async function GET() {
         shippingAwbCode: order.shippingAwbCode,
         shippingCourierName: order.shippingCourierName,
         // Only ever populated from a real provider response (Borzo today —
-        // see Part 12/13 of the Borzo integration task); null for
+        // see lib/shipping/providers/borzo.ts's getCourier); null for
         // Shiprocket/Porter rows, which never fabricate a rider identity.
         deliveryExecutiveName: order.deliveryExecutiveName,
         deliveryExecutivePhone: order.deliveryExecutivePhone,
+        deliveryExecutivePhotoUrl: order.deliveryExecutivePhotoUrl,
+        // Only present while a courier is genuinely assigned and reporting
+        // a live position — never derived from an address/pincode/city
+        // center. Always both-or-neither (see admin-orders.ts).
+        deliveryExecutiveLatitude: order.deliveryExecutiveLatitude,
+        deliveryExecutiveLongitude: order.deliveryExecutiveLongitude,
+        shippingWaybillUrl: order.shippingWaybillUrl,
         shippingLastUpdatedAt: order.shippingLastUpdatedAt ? order.shippingLastUpdatedAt.toISOString() : null,
         shippingEstimatedDeliveryAt: order.shippingEstimatedDeliveryAt ? order.shippingEstimatedDeliveryAt.toISOString() : null,
         refundStatus: order.refundStatus,

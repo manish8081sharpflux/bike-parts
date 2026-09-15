@@ -351,14 +351,28 @@ export async function refreshDeliveryStatusAction(orderId: string) {
       const { status } = await getPorterDeliveryStatus(order.shippingOrderId);
       await applyLegacyPorterForwardStatus(orderId, status);
     } else if (order.shippingProvider === "BORZO") {
+      // GET /orders (order/status/tracking) + GET /courier (real rider, if
+      // assigned) — see lib/shipping/service.ts's trackLocalDelivery, which
+      // never fails the whole refresh just because no courier exists yet.
       const tracking = await trackLocalDelivery(order.shippingOrderId);
-      const mapped = mapBorzoStatusToOrderStatus(tracking.status);
+      const hasLiveLocation = tracking.courierLatitude != null && tracking.courierLongitude != null;
+      const mapped = mapBorzoStatusToOrderStatus(tracking.status, {
+        pointStatuses: tracking.pointDeliveryStatus ? [tracking.pointDeliveryStatus] : [],
+        courierHasLiveLocation: hasLiveLocation,
+      });
       await applyProviderTrackingUpdate(orderId, mapped, tracking.status, "Borzo", {
         shippingStatus: tracking.status,
         shippingTrackingUrl: tracking.trackingUrl ?? order.shippingTrackingUrl,
+        shippingWaybillUrl: tracking.waybillUrl ?? order.shippingWaybillUrl,
         shippingCourierName: tracking.courierName ?? order.shippingCourierName,
         deliveryExecutiveName: tracking.courierName ?? order.deliveryExecutiveName,
         deliveryExecutivePhone: tracking.courierPhone ?? order.deliveryExecutivePhone,
+        deliveryExecutiveId: tracking.courierId ?? order.deliveryExecutiveId,
+        deliveryExecutivePhotoUrl: tracking.courierPhotoUrl ?? order.deliveryExecutivePhotoUrl,
+        // Only ever both-or-neither — a stale single coordinate left over
+        // from a courier who's since gone off-shift is not a real position.
+        deliveryExecutiveLatitude: hasLiveLocation ? tracking.courierLatitude : null,
+        deliveryExecutiveLongitude: hasLiveLocation ? tracking.courierLongitude : null,
         shippingLastUpdatedAt: new Date(),
       });
     } else {
@@ -526,8 +540,13 @@ export async function createBorzoDeliveryAction(orderId: string) {
           shippingCourierName: created.courierName,
           deliveryExecutiveName: created.courierName,
           deliveryExecutivePhone: created.courierPhone,
+          deliveryExecutiveId: created.courierId,
+          deliveryExecutivePhotoUrl: created.courierPhotoUrl,
+          deliveryExecutiveLatitude: created.courierLatitude != null && created.courierLongitude != null ? created.courierLatitude : null,
+          deliveryExecutiveLongitude: created.courierLatitude != null && created.courierLongitude != null ? created.courierLongitude : null,
           shippingStatus: created.status,
           shippingTrackingUrl: created.trackingUrl,
+          shippingWaybillUrl: created.waybillUrl,
           shippingLastUpdatedAt: new Date(),
           status: "SHIPPED",
           shippingReconciliationRequired: false,

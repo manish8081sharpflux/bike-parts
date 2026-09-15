@@ -137,7 +137,7 @@ test("Borzo tracking updates apply through the shared transition helper and writ
     data: { shippingProvider: "BORZO", shippingOrderId: `borzo_${suffix}`, status: "SHIPPED" },
   });
 
-  const mapped = mapBorzoStatusToOrderStatus("active", ["picked up from pickup point"]);
+  const mapped = mapBorzoStatusToOrderStatus("active", { pointStatuses: ["picked up from pickup point"] });
   assert.equal(mapped, "OUT_FOR_DELIVERY");
   await applyProviderTrackingUpdate(created.id, mapped, "active", "Borzo", {
     shippingStatus: "active",

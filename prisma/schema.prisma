@@ -296,6 +296,18 @@ model Order {
   // lib/order-tracking.ts's lastTrackingUpdate/expectedDelivery).
   deliveryExecutiveName                String?
   deliveryExecutivePhone               String?
+  // Borzo's real courier id/photo/live position — from GET /courier, never
+  // derived from an address/pincode/city center. Latitude/longitude follow
+  // the same Float? convention as Address.latitude/longitude above; both
+  // are only ever set together (see borzo.ts's getCourier).
+  deliveryExecutiveId                  String?
+  deliveryExecutivePhotoUrl            String?
+  deliveryExecutiveLatitude            Float?
+  deliveryExecutiveLongitude           Float?
+  // A real Borzo waybill/document URL only (Part 20 of the Borzo API
+  // accuracy task) — optional, never required for the local-delivery
+  // workflow, never populated for Shiprocket/Porter rows.
+  shippingWaybillUrl                   String?
   shippingLastUpdatedAt                DateTime?
   shippingEstimatedDeliveryAt          DateTime?
   shippingReconciliationRequired       Boolean           @default(false)

@@ -608,6 +608,17 @@ export default async function AdminOrderDetailPage({
                     Track Shipment ↗
                   </a>
                 ) : null}
+                {/* Optional — only ever a real Borzo waybill_document_url (Part 20); never required for the local-delivery workflow. */}
+                {order.shippingWaybillUrl ? (
+                  <a
+                    href={order.shippingWaybillUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs font-bold text-zinc-700 underline"
+                  >
+                    Open Waybill ↗
+                  </a>
+                ) : null}
 
                 <form action={boundRefresh} className="mt-2">
                   <button

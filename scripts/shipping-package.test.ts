@@ -115,8 +115,13 @@ test("mapBorzoStatusToOrderStatus maps confirmed order-level statuses correctly"
 });
 
 test("mapBorzoStatusToOrderStatus upgrades 'active' to OUT_FOR_DELIVERY using a best-effort point-level hint", () => {
-  assert.equal(mapBorzoStatusToOrderStatus("active", ["arrived at drop-off"]), "OUT_FOR_DELIVERY");
-  assert.equal(mapBorzoStatusToOrderStatus("active", ["picked up from pickup point"]), "OUT_FOR_DELIVERY");
+  assert.equal(mapBorzoStatusToOrderStatus("active", { pointStatuses: ["arrived at drop-off"] }), "OUT_FOR_DELIVERY");
+  assert.equal(mapBorzoStatusToOrderStatus("active", { pointStatuses: ["picked up from pickup point"] }), "OUT_FOR_DELIVERY");
+});
+
+test("mapBorzoStatusToOrderStatus upgrades 'active' to OUT_FOR_DELIVERY when the courier is reporting a real live position", () => {
+  assert.equal(mapBorzoStatusToOrderStatus("active", { courierHasLiveLocation: true }), "OUT_FOR_DELIVERY");
+  assert.equal(mapBorzoStatusToOrderStatus("active", { courierHasLiveLocation: false }), "SHIPPED");
 });
 
 test("mapBorzoStatusToOrderStatus never crashes on an unrecognized status string", () => {

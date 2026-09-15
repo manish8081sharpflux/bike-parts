@@ -155,6 +155,13 @@ export type Order = {
   shippingLastUpdatedAt?: string | null;
   deliveryExecutiveName?: string | null;
   deliveryExecutivePhone?: string | null;
+  /** Only present when the provider actually returned a real photo (Borzo) — never a generated avatar/initials. */
+  deliveryExecutivePhotoUrl?: string | null;
+  /** Both present only while a courier is genuinely assigned and reporting a live position — never derived from an address, pincode, or city center. */
+  deliveryExecutiveLatitude?: number | null;
+  deliveryExecutiveLongitude?: number | null;
+  /** A real Borzo waybill/document URL only — optional, shown to admin only. */
+  shippingWaybillUrl?: string | null;
   supportEmail?: string | null;
   supportPhone?: string | null;
   bikeLabel: string;

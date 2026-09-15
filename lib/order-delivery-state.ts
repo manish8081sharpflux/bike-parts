@@ -38,6 +38,11 @@ export type ProviderTrackingFields = {
   shippingCourierName?: string | null;
   deliveryExecutiveName?: string | null;
   deliveryExecutivePhone?: string | null;
+  deliveryExecutiveId?: string | null;
+  deliveryExecutivePhotoUrl?: string | null;
+  deliveryExecutiveLatitude?: number | null;
+  deliveryExecutiveLongitude?: number | null;
+  shippingWaybillUrl?: string | null;
   shippingLastUpdatedAt?: Date;
 };
 

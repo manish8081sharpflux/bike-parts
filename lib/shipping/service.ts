@@ -138,43 +138,64 @@ export function checkLocalDeliveryEligibility(warehouseCity: string | null | und
   return checkPuneEligibility(warehouseCity, customerCity, customerPincode);
 }
 
-/** A price/ETA quote from Borzo — never creates a real delivery. Only ever shows a fee/ETA the provider actually returned (see LocalDeliveryQuote's doc comments) — never fabricated. */
+/** A price/fee quote from Borzo — never creates a real delivery. Only ever shows amounts the provider actually returned (see LocalDeliveryQuote's doc comments) — never fabricated. */
 export async function quoteLocalDelivery(input: LocalDeliveryInput): Promise<LocalDeliveryQuote> {
   const result = await borzo.calculateDelivery(input);
   return {
     provider: "BORZO",
-    deliveryFeeAmount: Number.isFinite(result.deliveryFeeAmount) ? result.deliveryFeeAmount : null,
+    deliveryFeeAmount: result.deliveryFeeAmount,
+    paymentAmount: result.paymentAmount,
     estimatedDeliveryAt: null, // Borzo's calculate-order response doesn't return an absolute ETA timestamp in what's confirmed from the docs — never guessed here.
     raw: result.raw,
   };
 }
 
-/** Creates a real Borzo delivery order. */
-export async function createLocalDelivery(input: LocalDeliveryInput): Promise<LocalDeliveryResult> {
-  const result = await borzo.createDeliveryOrder(input);
+/**
+ * A courier lookup failure (no courier assigned yet, or a transient error)
+ * must never fail the surrounding create/track call — the order/tracking
+ * result is still real and valid on its own. Logged, never surfaced to the
+ * caller; the caller simply sees "no courier info yet" (see Part 4/14).
+ */
+async function safeGetCourier(borzoOrderId: string): Promise<borzo.BorzoCourierResult> {
+  try {
+    return await borzo.getCourier(borzoOrderId);
+  } catch (error) {
+    console.error("[shipping] Borzo courier lookup failed for order", borzoOrderId, error);
+    return { courierId: null, name: null, phone: null, photoUrl: null, latitude: null, longitude: null };
+  }
+}
+
+function toLocalDeliveryResult(order: borzo.BorzoOrderResult, courier: borzo.BorzoCourierResult): LocalDeliveryResult {
   return {
     provider: "BORZO",
-    shippingOrderId: result.borzoOrderId,
-    status: result.status,
-    trackingUrl: result.trackingUrl,
-    courierName: result.courierName,
-    courierPhone: result.courierPhone,
-    raw: result.raw,
+    shippingOrderId: order.borzoOrderId,
+    status: order.status,
+    statusDescription: order.statusDescription,
+    pointDeliveryStatus: order.pointDeliveryStatus,
+    trackingUrl: order.trackingUrl,
+    waybillUrl: order.waybillUrl,
+    courierId: courier.courierId,
+    courierName: courier.name,
+    courierPhone: courier.phone,
+    courierPhotoUrl: courier.photoUrl,
+    courierLatitude: courier.latitude,
+    courierLongitude: courier.longitude,
+    raw: order.raw,
   };
 }
 
-/** Re-fetches a Borzo delivery's current status/courier/tracking. */
+/** Creates a real Borzo delivery order, then checks (best-effort) whether a courier has already been assigned. */
+export async function createLocalDelivery(input: LocalDeliveryInput): Promise<LocalDeliveryResult> {
+  const result = await borzo.createDeliveryOrder(input);
+  const courier = await safeGetCourier(result.borzoOrderId);
+  return toLocalDeliveryResult(result, courier);
+}
+
+/** Re-fetches a Borzo delivery's current order status and real assigned courier/rider (if any) via the documented GET /orders and GET /courier endpoints. */
 export async function trackLocalDelivery(borzoOrderId: string): Promise<LocalDeliveryResult> {
   const result = await borzo.fetchDeliveryStatus(borzoOrderId);
-  return {
-    provider: "BORZO",
-    shippingOrderId: result.borzoOrderId,
-    status: result.status,
-    trackingUrl: result.trackingUrl,
-    courierName: result.courierName,
-    courierPhone: result.courierPhone,
-    raw: result.raw,
-  };
+  const courier = await safeGetCourier(borzoOrderId);
+  return toLocalDeliveryResult(result, courier);
 }
 
 /** Cancels a Borzo delivery — only meaningful before pickup; Borzo itself rejects cancellation past that point with a definite (non-uncertain) error. */
