@@ -61,6 +61,13 @@ export async function GET() {
         shippingTrackingUrl: order.shippingTrackingUrl,
         shippingAwbCode: order.shippingAwbCode,
         shippingCourierName: order.shippingCourierName,
+        // Only ever populated from a real provider response (Borzo today —
+        // see Part 12/13 of the Borzo integration task); null for
+        // Shiprocket/Porter rows, which never fabricate a rider identity.
+        deliveryExecutiveName: order.deliveryExecutiveName,
+        deliveryExecutivePhone: order.deliveryExecutivePhone,
+        shippingLastUpdatedAt: order.shippingLastUpdatedAt ? order.shippingLastUpdatedAt.toISOString() : null,
+        shippingEstimatedDeliveryAt: order.shippingEstimatedDeliveryAt ? order.shippingEstimatedDeliveryAt.toISOString() : null,
         refundStatus: order.refundStatus,
         refundReason: order.refundReason,
         refundAdminNote: order.refundAdminNote,

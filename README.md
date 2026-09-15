@@ -76,13 +76,23 @@ per `lib/security/production-config.ts`):
   `pnpm security:check` (fix it or clear it entirely — don't leave it half
   configured).
 - Shipping (`SHIPPING_PROVIDER`, `SHIPROCKET_EMAIL`, `SHIPROCKET_PASSWORD`,
-  `SHIPROCKET_PICKUP_LOCATION`, warehouse address vars) — shipment creation
-  through the generic shipping service (`lib/shipping/`), Shiprocket is the
-  active provider. `SHIPROCKET_PICKUP_LOCATION` must exactly match a pickup
-  location already configured in the Shiprocket dashboard. Legacy
-  `PORTER_*` vars are only needed if the deployment still has historical
-  Porter-provider shipments to track/cancel (see `lib/porter.ts`) — never
-  set them up for a new deployment.
+  `SHIPROCKET_PICKUP_LOCATION`, `BORZO_API_BASE_URL`, `BORZO_API_TOKEN`,
+  warehouse address vars) — shipment creation through the generic shipping
+  service (`lib/shipping/`). Both providers are active at once, for
+  different order shapes: Shiprocket handles long-haul forward/reverse
+  shipments (create → AWB → pickup → tracking); Borzo handles same-city
+  local delivery, currently gated to Pune-to-Pune orders only (`WAREHOUSE_CITY`
+  must be `Pune`, see `lib/shipping/pune-eligibility.ts`) via a
+  quote → create → track → cancel flow with no AWB/label concept.
+  `SHIPPING_PROVIDER` is informational only (admin dashboard/health display),
+  it does not disable either provider. `SHIPROCKET_PICKUP_LOCATION` must
+  exactly match a pickup location already configured in the Shiprocket
+  dashboard. `BORZO_API_BASE_URL` should stay pointed at Borzo's test API
+  (`https://robotapitest-in.borzodelivery.com/api/business/1.8`) until a
+  production token is approved — see `.env.example`. Legacy `PORTER_*` vars
+  are only needed if the deployment still has historical Porter-provider
+  shipments to track/cancel (see `lib/porter.ts`) — never set them up for a
+  new deployment.
 - `NEXT_PUBLIC_POSTHOG_KEY` / `NEXT_PUBLIC_POSTHOG_HOST` — product analytics.
 - `SENTRY_DSN` — not currently wired up; see "Monitoring" below before
   adding it.
@@ -151,7 +161,7 @@ before anything retries real money or a real shipment):
 | Command | Reports on | Exit code |
 |---|---|---|
 | `pnpm reconcile:payments` | Refunds stuck in `PROCESSING` | non-zero if any candidates found |
-| `pnpm reconcile:shipping` | Forward/return/partial-return shipments in an uncertain state (Shiprocket), plus any legacy Porter-provider candidates | non-zero if any candidates found |
+| `pnpm reconcile:shipping` | Forward/return/partial-return shipments in an uncertain state (Shiprocket and Borzo), plus any legacy Porter-provider candidates | non-zero if any candidates found |
 | `pnpm reconcile:search` | Listings where `searchSynced=false` (only meaningful if Meilisearch is configured) | non-zero if any remain unsynced after retrying |
 
 `reconcile:search` is the one exception that *does* act — it retries syncing
@@ -234,6 +244,8 @@ forward-only by convention here). To roll back a bad release:
 | Checkout succeeds but payment never confirms | Razorpay webhook not configured, or `RAZORPAY_WEBHOOK_SECRET` mismatch | Razorpay dashboard webhook delivery log; `[webhook][razorpay]` in server logs |
 | Refund stuck, never completes | Razorpay API call failed/timed out mid-flight | `pnpm reconcile:payments` |
 | Shipment creation/AWB/pickup/cancellation stuck | Shiprocket API call outcome uncertain | `pnpm reconcile:shipping` |
+| Borzo local delivery creation stuck, or "Create Borzo Delivery" stays disabled | Borzo API call outcome uncertain, or a delivery was already claimed (`shippingOrderId`) | `pnpm reconcile:shipping` (Borzo section); check `shippingReconciliationRequired` on the order |
+| "Borzo local delivery is currently enabled only for Pune addresses" shown for an order the admin expected to be local | Warehouse or customer city doesn't normalize to "Pune" | `WAREHOUSE_CITY` env var; `deliveryAddress.city` on the order; `lib/shipping/pune-eligibility.ts` |
 | Product image upload fails | R2 credentials wrong/missing in production (fails closed, no local-disk fallback) | `[product-images]` in server logs; `pnpm security:check` |
 | Everyone logged out of `/admin` unexpectedly | `ADMIN_SESSION_VERSION` was bumped (intentional revocation) or `ADMIN_SESSION_SECRET` changed | Check recent env changes |
 
@@ -248,6 +260,10 @@ pnpm test:checkout-payment-race
 pnpm test:order-refund-state
 pnpm test:webhook-lifecycle
 pnpm test:shipping-state
+pnpm test:shiprocket-provider
+pnpm test:borzo-provider
+pnpm test:shipping-package
+pnpm test:pune-eligibility
 pnpm test:order-return-state
 pnpm test:order-returns-partial
 pnpm test:addresses

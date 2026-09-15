@@ -7,6 +7,7 @@ import {
   approveRefundAction,
   approveReturnAction,
   cancelShipmentAction,
+  createBorzoDeliveryAction,
   dispatchOrderAction,
   dispatchReturnPickupAction,
   markReturnReceivedAction,
@@ -16,10 +17,20 @@ import {
   rejectReturnAction,
   updateOrderStatusAction,
 } from "@/lib/actions/admin-orders";
+import { checkLocalDeliveryEligibility } from "@/lib/shipping/service";
 import { RefundReadyPopup } from "./RefundReadyPopup";
 import { ActivityLog } from "./ActivityLog";
 import { PartialReturnsSection } from "./PartialReturnsSection";
 import { ShipmentDispatchForm } from "./ShipmentDispatchForm";
+import { BorzoDeliveryForm } from "./BorzoDeliveryForm";
+
+/** Nicely-cased display label for a raw ShippingProvider enum value. */
+function providerLabel(provider: string | null) {
+  if (provider === "SHIPROCKET") return "Shiprocket";
+  if (provider === "BORZO") return "Borzo";
+  if (provider === "PORTER") return "Porter";
+  return "Shiprocket";
+}
 
 export const dynamic = "force-dynamic";
 
@@ -90,6 +101,12 @@ export default async function AdminOrderDetailPage({
   const boundRefreshReturnPickup = refreshReturnPickupStatusAction.bind(null, order.id);
   const boundMarkReturnReceived = markReturnReceivedAction.bind(null, order.id);
   const boundCancelShipment = cancelShipmentAction.bind(null, order.id);
+  const boundCreateBorzoDelivery = createBorzoDeliveryAction.bind(null, order.id);
+  // Borzo is a same-city courier — only offered when both the warehouse and
+  // this order's delivery address are Pune (see lib/shipping/pune-eligibility.ts).
+  // Re-checked server-side again inside createBorzoDeliveryAction/the quote
+  // route — this is only what decides whether the card renders at all.
+  const canOfferBorzo = checkLocalDeliveryEligibility(process.env.WAREHOUSE_CITY, address.city, address.pincode).eligible;
 
   return (
     <div className="flex flex-col gap-4">
@@ -562,13 +579,14 @@ export default async function AdminOrderDetailPage({
             ) : order.shippingOrderId && order.shippingOrderId !== "CREATING" ? (
               <div className="mt-2 flex flex-col gap-1 text-sm">
                 <p>
-                  Provider: <span className="font-bold">{order.shippingProvider ?? "Shiprocket"}</span>
+                  Provider: <span className="font-bold">{providerLabel(order.shippingProvider)}</span>
                 </p>
                 {order.shippingCourierName ? (
                   <p>
-                    Courier: <span className="font-bold">{order.shippingCourierName}</span>
+                    {order.shippingProvider === "BORZO" ? "Courier/Rider" : "Courier"}: <span className="font-bold">{order.shippingCourierName}</span>
                   </p>
                 ) : null}
+                {/* Borzo has no AWB/label concept — shippingAwbCode is only ever populated for Shiprocket/Porter rows (see Part 11), so this simply never renders for a Borzo delivery. */}
                 {order.shippingAwbCode ? (
                   <p>
                     AWB: <span className="font-mono text-xs">{order.shippingAwbCode}</span>
@@ -577,6 +595,9 @@ export default async function AdminOrderDetailPage({
                 <p>
                   Status: <span className="font-bold">{order.shippingStatus ?? "unknown"}</span>
                 </p>
+                {order.shippingLastUpdatedAt ? (
+                  <p className="text-xs text-zinc-500">Last update: {order.shippingLastUpdatedAt.toLocaleString("en-IN")}</p>
+                ) : null}
                 {order.shippingTrackingUrl ? (
                   <a
                     href={order.shippingTrackingUrl}
@@ -602,7 +623,7 @@ export default async function AdminOrderDetailPage({
                       type="submit"
                       className="h-9 w-full rounded-lg border border-red-200 text-xs font-bold text-red-700 hover:bg-red-50"
                     >
-                      Cancel Shipment
+                      {order.shippingProvider === "BORZO" ? "Cancel Delivery" : "Cancel Shipment"}
                     </button>
                   </form>
                 ) : null}
@@ -618,6 +639,25 @@ export default async function AdminOrderDetailPage({
               </div>
             )}
           </div>
+
+          {/*
+            Borzo Local Delivery card — a same-city courier option shown
+            only for Pune-to-Pune orders (Part 7/9), and only before any
+            shipment (Shiprocket or Borzo) has been created — once
+            order.shippingOrderId is set, the "Shipping" card above takes
+            over regardless of which provider won. Never shows Shiprocket's
+            AWB/label workflow (Part 10) since Borzo's own create action
+            never touches those fields.
+          */}
+          {canOfferBorzo && order.paymentStatus === "PAID" && (!order.shippingOrderId || order.shippingOrderId === "CREATING") ? (
+            <div className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-zinc-100">
+              <h2 className="text-base font-black">Borzo Local Delivery</h2>
+              <p className="mt-1 text-xs text-zinc-500">Same-city courier for Pune-to-Pune orders.</p>
+              <div className="mt-3">
+                <BorzoDeliveryForm action={boundCreateBorzoDelivery} quoteUrl={`/api/admin/orders/${order.id}/borzo-quote`} />
+              </div>
+            </div>
+          ) : null}
         </div>
       </div>
     </div>

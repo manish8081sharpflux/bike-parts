@@ -1,5 +1,6 @@
 import { ChevronDown } from "lucide-react";
 import { formatInr } from "@/lib/format";
+import type { ShippingProviderName } from "@/app/home/types";
 import {
   approvePartialRefundAction,
   approvePartialReturnAction,
@@ -17,7 +18,7 @@ type PartialReturn = {
   reason: string;
   adminNote: string | null;
   condition: "RESELLABLE" | "DAMAGED" | null;
-  shippingProvider: "PORTER" | "SHIPROCKET" | null;
+  shippingProvider: ShippingProviderName | null;
   shippingOrderId: string | null;
   shippingShipmentId: string | null;
   shippingAwbCode: string | null;

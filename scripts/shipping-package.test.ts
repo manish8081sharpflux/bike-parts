@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildPackage, PackageBuildError } from "@/lib/shipping/package";
-import { isShiprocketReversePickedUp } from "@/lib/shipping/status-mapping";
+import { buildPackage, calculateTotalWeightKg, PackageBuildError } from "@/lib/shipping/package";
+import { isShiprocketReversePickedUp, mapBorzoStatusToOrderStatus } from "@/lib/shipping/status-mapping";
 
 // 24. missing product weight prevents shipment
 test("a missing shipping weight blocks package creation, naming the product", () => {
@@ -81,4 +81,45 @@ test("isShiprocketReversePickedUp recognizes collection/in-transit statuses but 
   assert.equal(isShiprocketReversePickedUp("PICKUP SCHEDULED"), false);
   assert.equal(isShiprocketReversePickedUp("RTO INITIATED"), false);
   assert.equal(isShiprocketReversePickedUp("PICKUP EXCEPTION"), false);
+});
+
+// calculateTotalWeightKg — Borzo's request shape has no dimensions field, so
+// local deliveries use this instead of buildPackage.
+test("calculateTotalWeightKg sums productWeight x quantity and never approximates a missing weight", () => {
+  const total = calculateTotalWeightKg([
+    { productName: "Brake Pads", quantity: 2, weightKg: 0.3 },
+    { productName: "Oil Filter", quantity: 1, weightKg: 0.2 },
+  ]);
+  assert.equal(Math.round(total * 100) / 100, 0.8);
+
+  assert.throws(
+    () => calculateTotalWeightKg([{ productName: "Spark Plug", quantity: 1, weightKg: null }]),
+    (error: unknown) => {
+      assert.ok(error instanceof PackageBuildError);
+      assert.match(error.message, /Spark Plug/);
+      return true;
+    }
+  );
+});
+
+// 8/9. Borzo delivered / out-for-delivery mapping — only the confirmed
+// order-level statuses (new/available/active/delayed/completed/cancelled)
+// are ground truth; point-level strings are a best-effort upgrade only.
+test("mapBorzoStatusToOrderStatus maps confirmed order-level statuses correctly", () => {
+  assert.equal(mapBorzoStatusToOrderStatus("completed"), "DELIVERED");
+  assert.equal(mapBorzoStatusToOrderStatus("cancelled"), "CANCELLED");
+  assert.equal(mapBorzoStatusToOrderStatus("active"), "SHIPPED", "no point-level hint -> the coarser but still-confirmed SHIPPED");
+  assert.equal(mapBorzoStatusToOrderStatus("new"), null, "not yet actionable — never advances the order");
+  assert.equal(mapBorzoStatusToOrderStatus("available"), null);
+  assert.equal(mapBorzoStatusToOrderStatus("delayed"), null, "still in progress — never regresses status");
+});
+
+test("mapBorzoStatusToOrderStatus upgrades 'active' to OUT_FOR_DELIVERY using a best-effort point-level hint", () => {
+  assert.equal(mapBorzoStatusToOrderStatus("active", ["arrived at drop-off"]), "OUT_FOR_DELIVERY");
+  assert.equal(mapBorzoStatusToOrderStatus("active", ["picked up from pickup point"]), "OUT_FOR_DELIVERY");
+});
+
+test("mapBorzoStatusToOrderStatus never crashes on an unrecognized status string", () => {
+  assert.equal(mapBorzoStatusToOrderStatus("some-future-borzo-status"), null);
+  assert.equal(mapBorzoStatusToOrderStatus(""), null);
 });

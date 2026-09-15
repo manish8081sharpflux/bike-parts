@@ -8,8 +8,8 @@
  * should ever need to change.
  */
 
-/** The set of shipping providers this app can actively create NEW shipments through. Historical DB rows may also carry "PORTER" (see the Prisma ShippingProvider enum) for shipments created before this migration — that value is never returned here and never selectable as the active provider. */
-export type ShippingProvider = "SHIPROCKET";
+/** The set of shipping providers this app can actively create NEW shipments through — SHIPROCKET for long-haul/pan-India forward shipments and reverse returns, BORZO for same-city local Pune deliveries (see lib/shipping/pune-eligibility.ts). Historical DB rows may also carry "PORTER" (see the Prisma ShippingProvider enum) for shipments created before the Shiprocket migration — that value is never returned by getConfiguredProvider() and never selectable as an active provider. */
+export type ShippingProvider = "SHIPROCKET" | "BORZO";
 
 export type ShippingAddress = {
   contactName: string;
@@ -110,4 +110,39 @@ export type CheckServiceabilityInput = {
   deliveryPincode: string;
   weightKg: number;
   cod: boolean;
+};
+
+// --- Local (same-city) delivery — Borzo today. A deliberately different,
+// simpler shape from the long-haul CreateShipmentInput/Result above: no
+// AWB, no separate pickup-scheduling step, and a real quote-before-booking
+// step that long-haul shipping doesn't have (see lib/shipping/service.ts's
+// quoteLocalDelivery/createLocalDelivery/trackLocalDelivery/
+// cancelLocalDelivery, kept apart from createShipment/assignAwb/
+// schedulePickup rather than forcing one shape to fit both).
+
+export type LocalDeliveryInput = {
+  pickup: ShippingAddress;
+  drop: ShippingAddress;
+  /** Free-text description of what's being carried — required by Borzo (`matter`). */
+  matter: string;
+  totalWeightKg?: number;
+};
+
+export type LocalDeliveryQuote = {
+  provider: ShippingProvider;
+  /** Only ever set from a real provider response — null when the provider genuinely didn't return a fee (never fabricated, see Part 8). */
+  deliveryFeeAmount: number | null;
+  /** Only ever set from a real provider response — most local couriers don't return an ETA at quote time; null means "not shown", never a guessed value. */
+  estimatedDeliveryAt: string | null;
+  raw: unknown;
+};
+
+export type LocalDeliveryResult = {
+  provider: ShippingProvider;
+  shippingOrderId: string;
+  status: string;
+  trackingUrl: string | null;
+  courierName: string | null;
+  courierPhone: string | null;
+  raw: unknown;
 };

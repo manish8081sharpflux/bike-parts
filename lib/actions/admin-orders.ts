@@ -5,16 +5,23 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { requireAdminAction } from "@/lib/auth/require-admin";
 import {
+  assertBorzoConfigured,
   assertShippingConfigured,
   assignAwb,
+  cancelLocalDelivery,
   cancelShipment,
+  checkLocalDeliveryEligibility,
+  createLocalDelivery,
   createReverseShipment,
   createShipment,
   schedulePickup,
+  trackLocalDelivery,
   trackShipment,
+  BorzoRequestError,
   ShippingProviderError,
 } from "@/lib/shipping/service";
-import { buildPackage } from "@/lib/shipping/package";
+import { buildPackage, calculateTotalWeightKg } from "@/lib/shipping/package";
+import { mapBorzoStatusToOrderStatus } from "@/lib/shipping/status-mapping";
 import { createRazorpayRefund, isRazorpayConfigured } from "@/lib/razorpay";
 import {
   claimRefundRequest,
@@ -23,6 +30,7 @@ import {
   markRefundSucceeded,
 } from "@/lib/order-refund-state";
 import {
+  applyProviderTrackingUpdate,
   applyShippingStatus,
   cancelAdminOrderBeforeDispatch,
   claimShippingDispatch,
@@ -122,7 +130,13 @@ function customerAddressFrom(order: { deliveryAddress: unknown; customerName: st
 /** True for a caught error that means the mutation's outcome is genuinely unknown — never safe to silently retry. */
 function isUncertain(error: unknown): boolean {
   if (error instanceof ShippingProviderError) return error.uncertain;
+  if (error instanceof BorzoRequestError) return error.uncertain;
   return false;
+}
+
+/** Borzo's required `matter` field — a free-text description of what's being carried, built from the order's real line items (never fabricated). */
+function buildMatterDescription(items: Array<{ productName: string; quantity: number }>) {
+  return items.map((item) => `${item.productName} x${item.quantity}`).join(", ").slice(0, 5000);
 }
 
 export async function updateOrderStatusAction(orderId: string, formData: FormData) {
@@ -336,6 +350,17 @@ export async function refreshDeliveryStatusAction(orderId: string) {
     if (order.shippingProvider === "PORTER") {
       const { status } = await getPorterDeliveryStatus(order.shippingOrderId);
       await applyLegacyPorterForwardStatus(orderId, status);
+    } else if (order.shippingProvider === "BORZO") {
+      const tracking = await trackLocalDelivery(order.shippingOrderId);
+      const mapped = mapBorzoStatusToOrderStatus(tracking.status);
+      await applyProviderTrackingUpdate(orderId, mapped, tracking.status, "Borzo", {
+        shippingStatus: tracking.status,
+        shippingTrackingUrl: tracking.trackingUrl ?? order.shippingTrackingUrl,
+        shippingCourierName: tracking.courierName ?? order.shippingCourierName,
+        deliveryExecutiveName: tracking.courierName ?? order.deliveryExecutiveName,
+        deliveryExecutivePhone: tracking.courierPhone ?? order.deliveryExecutivePhone,
+        shippingLastUpdatedAt: new Date(),
+      });
     } else {
       const tracking = await trackShipment({ awbCode: order.shippingAwbCode, shippingShipmentId: order.shippingShipmentId });
       await applyShippingStatus(orderId, tracking.rawStatus);
@@ -355,7 +380,7 @@ export async function refreshDeliveryStatusAction(orderId: string) {
   revalidatePath("/admin");
 }
 
-/** Legacy-only: applies a raw Porter status string using Porter's own (frozen) status vocabulary — kept solely so historical PORTER-provider orders remain trackable. Never used for new (SHIPROCKET) shipments. */
+/** Legacy-only: applies a raw Porter status string using Porter's own (frozen) status vocabulary — kept solely so historical PORTER-provider orders remain trackable. Never used for new (SHIPROCKET/BORZO) shipments. */
 async function applyLegacyPorterForwardStatus(orderId: string, rawStatus: string) {
   const value = rawStatus.toLowerCase().trim();
   let mapped: OrderStatus | null = null;
@@ -363,19 +388,7 @@ async function applyLegacyPorterForwardStatus(orderId: string, rawStatus: string
   else if (value.includes("out_for_delivery") || value.includes("out for delivery") || value.includes("transit") || value.includes("ongoing") || value.includes("picked") || value.includes("arrived")) mapped = "OUT_FOR_DELIVERY";
   else if (value === "delivered" || value.includes("completed") || value.includes("complete")) mapped = "DELIVERED";
 
-  return prisma.$transaction(async (tx) => {
-    await tx.order.update({ where: { id: orderId }, data: { shippingStatus: rawStatus } });
-    if (!mapped) return;
-    const allowedPrevious: Record<string, OrderStatus[]> = {
-      OUT_FOR_DELIVERY: ["PAID", "PACKED", "SHIPPED"],
-      DELIVERED: ["PAID", "PACKED", "SHIPPED", "OUT_FOR_DELIVERY"],
-      CANCELLED: ["PAID", "PACKED", "SHIPPED", "OUT_FOR_DELIVERY"],
-    };
-    const transitioned = await tx.order.updateMany({ where: { id: orderId, status: { in: allowedPrevious[mapped] ?? [] } }, data: { status: mapped } });
-    if (transitioned.count === 1) {
-      await tx.orderEvent.create({ data: { orderId, type: "STATUS_CHANGE", message: `Status changed to ${ORDER_STATUS_LABELS[mapped] ?? mapped} (Porter status "${rawStatus}")` } });
-    }
-  });
+  await applyProviderTrackingUpdate(orderId, mapped, rawStatus, "Porter", { shippingStatus: rawStatus });
 }
 
 /**
@@ -403,6 +416,8 @@ export async function cancelShipmentAction(orderId: string) {
 
     if (order.shippingProvider === "PORTER") {
       await cancelPorterDelivery(order.shippingOrderId);
+    } else if (order.shippingProvider === "BORZO") {
+      await cancelLocalDelivery(order.shippingOrderId);
     } else {
       await cancelShipment(order.shippingOrderId);
     }
@@ -420,6 +435,129 @@ export async function cancelShipmentAction(orderId: string) {
     if (isUncertain(error)) {
       await prisma.order.update({ where: { id: orderId }, data: { shippingReconciliationRequired: true, shippingLastError: message } }).catch(() => {});
     }
+    redirect(`/admin/orders/${orderId}?error=${encodeURIComponent(message)}`);
+  }
+
+  revalidatePath(`/admin/orders/${orderId}`);
+  revalidatePath("/admin/orders");
+  revalidatePath("/admin");
+}
+
+// ---------------------------------------------------------------------------
+// Borzo local delivery — same-city courier, Pune-to-Pune only for now (see
+// lib/shipping/pune-eligibility.ts). A deliberately separate flow from the
+// Shiprocket dispatch above (Part 5/9 of the Borzo integration task): no
+// AWB, no assign/schedule sub-steps, and a real price quote surfaced before
+// booking (see the /borzo-quote API route + BorzoDeliveryForm client
+// component). Shares the exact same shippingOrderId "CREATING" claim
+// (claimShippingDispatch) as the Shiprocket path, so whichever of the two
+// an admin actually clicks first is the only one that can ever win — a
+// race between "Create Shipment" and "Create Borzo Delivery" on the same
+// order can still never create two shipments.
+// ---------------------------------------------------------------------------
+
+/**
+ * Creates a real Borzo delivery for a paid, Pune-eligible order. Re-checks
+ * eligibility server-side (never trusts that the button was only shown for
+ * a genuinely-eligible order) and re-validates every product has a real
+ * shipping weight before booking.
+ */
+export async function createBorzoDeliveryAction(orderId: string) {
+  await requireAdminAction();
+  let claimed = false;
+  let deliveryCreated = false;
+
+  try {
+    const order = await prisma.order.findUniqueOrThrow({
+      where: { id: orderId },
+      include: { items: { include: { listing: true } } },
+    });
+
+    if (order.paymentStatus !== "PAID") {
+      throw new Error("Order must be paid before a delivery can be created.");
+    }
+    if (!(order.status === "PAID" || order.status === "PACKED")) {
+      throw new Error("This order is not in a dispatchable fulfillment state.");
+    }
+    if (order.shippingOrderId) {
+      throw new Error("This order already has a shipment.");
+    }
+
+    const address = (order.deliveryAddress ?? {}) as DeliveryAddress;
+    const eligibility = checkLocalDeliveryEligibility(process.env.WAREHOUSE_CITY, address.city, address.pincode);
+    if (!eligibility.eligible) {
+      throw new Error(eligibility.reason);
+    }
+
+    assertBorzoConfigured();
+    assertWarehouseConfiguredInProduction();
+
+    const drop = customerAddressFrom(order);
+    const totalWeightKg = calculateTotalWeightKg(
+      order.items.map((item) => ({
+        productName: item.productName,
+        quantity: item.quantity,
+        weightKg: item.listing?.weightKg != null ? Number(item.listing.weightKg) : null,
+      }))
+    );
+
+    if (!(await claimShippingDispatch(orderId))) {
+      throw new Error("This order already has a shipment.");
+    }
+    claimed = true;
+
+    const created = await createLocalDelivery({
+      pickup: warehouseAddress(),
+      drop,
+      matter: buildMatterDescription(order.items),
+      totalWeightKg,
+    });
+    deliveryCreated = true;
+
+    await prisma.$transaction(async (tx) => {
+      const completed = await tx.order.updateMany({
+        where: { id: orderId, shippingOrderId: "CREATING" },
+        data: {
+          shippingProvider: "BORZO",
+          shippingOrderId: created.shippingOrderId,
+          shippingShipmentId: null,
+          // Borzo has no AWB/label concept — never fabricated (Part 11).
+          shippingAwbCode: null,
+          shippingCourierName: created.courierName,
+          deliveryExecutiveName: created.courierName,
+          deliveryExecutivePhone: created.courierPhone,
+          shippingStatus: created.status,
+          shippingTrackingUrl: created.trackingUrl,
+          shippingLastUpdatedAt: new Date(),
+          status: "SHIPPED",
+          shippingReconciliationRequired: false,
+          shippingLastError: null,
+        },
+      });
+      if (completed.count !== 1) throw new Error("Dispatch claim is no longer current.");
+      await tx.orderEvent.create({
+        data: { orderId, type: "SHIPMENT_CREATED", message: `Local delivery created via Borzo (order ${created.shippingOrderId})` },
+      });
+    });
+  } catch (error) {
+    console.error("[shipping] Borzo delivery creation failed for order", orderId, error);
+    if (claimed) {
+      const failureMessage = error instanceof Error ? error.message : "Could not create this delivery.";
+      // Once Borzo has actually created the order, any later failure must
+      // be treated as uncertain regardless of its own classification — a
+      // naive retry could book a second delivery.
+      const uncertain = deliveryCreated || isUncertain(error);
+      await prisma.$transaction(async (tx) => {
+        if (uncertain) {
+          await tx.order.updateMany({ where: { id: orderId, shippingOrderId: "CREATING" }, data: { shippingStatus: "RECONCILIATION_REQUIRED", shippingReconciliationRequired: true, shippingLastError: failureMessage } });
+          await tx.orderEvent.create({ data: { orderId, type: "SHIPMENT_RECONCILIATION_REQUIRED", message: failureMessage } });
+        } else {
+          await tx.order.updateMany({ where: { id: orderId, shippingOrderId: "CREATING" }, data: { shippingOrderId: null, shippingStatus: null, shippingLastError: failureMessage } });
+          await tx.orderEvent.create({ data: { orderId, type: "SHIPMENT_CREATE_FAILED", message: failureMessage } });
+        }
+      });
+    }
+    const message = error instanceof Error ? error.message : "Could not create this delivery.";
     redirect(`/admin/orders/${orderId}?error=${encodeURIComponent(message)}`);
   }
 

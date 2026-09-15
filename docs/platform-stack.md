@@ -89,10 +89,12 @@ values are exposed to the browser.
 - **Schema**: `Order`/`OrderItem`/`OrderEvent` extended for payments and
   shipping (`paymentStatus`, `razorpayOrderId/PaymentId/Signature`,
   `shippingProvider/OrderId/ShipmentId/AwbCode/CourierName/Status/TrackingUrl`,
-  `taxAmount`, denormalized order-item snapshots) — `shippingProvider` is a
-  `ShippingProvider` enum (`PORTER` | `SHIPROCKET`) so historical shipments
-  from before the Shiprocket migration stay honestly attributed; see
-  "Shipping" below. `User.email` is now optional and `User.phone` unique. Customer
+  `deliveryExecutiveName/Phone`, `shippingLastUpdatedAt`,
+  `shippingEstimatedDeliveryAt`, `taxAmount`, denormalized order-item
+  snapshots) — `shippingProvider` is a `ShippingProvider` enum (`PORTER` |
+  `SHIPROCKET` | `BORZO`) so historical shipments from before the Shiprocket
+  and Borzo migrations stay honestly attributed; see "Shipping" below.
+  `User.email` is now optional and `User.phone` unique. Customer
   login uses OTP verification and a server-side session cookie.
   `BikePartListing.sellerId` is optional so admin-created products don't need a
   marketplace seller.
@@ -113,30 +115,66 @@ values are exposed to the browser.
   `POST /api/webhooks/razorpay` is a webhook safety net for the `payment.captured` event. Checkout resolves prices and GST from active `BikePartListing` rows server-side; delivery charge and discount are also server-defined.
 - **Shipping**: `lib/shipping/` is a generic, provider-neutral service
   (`types.ts`, `service.ts`, `package.ts`, `status-mapping.ts`,
-  `admin-serviceability.ts`) — the rest of the app depends only on
-  `lib/shipping/service.ts` (`createShipment`, `createReverseShipment`,
-  `assignAwb`, `schedulePickup`, `trackShipment`, `cancelShipment`,
-  `checkServiceability`), never on a provider file directly. Shiprocket
-  (`lib/shipping/providers/shiprocket.ts`) is the only implemented provider,
-  selected via `SHIPPING_PROVIDER=SHIPROCKET`, built against Shiprocket's
-  documented External API v1 (auth/login, orders/create/adhoc,
-  orders/create/return, courier/assign/awb, courier/generate/pickup,
-  courier/track/awb, orders/cancel, courier/serviceability). Auth token is
-  cached in-memory (~9 days, refreshed on a 401) — never re-authenticates
-  per request. Dispatch (forward and reverse) uses the same
-  claim-before-mutate pattern as the old Porter dispatch: a placeholder
-  (`shippingOrderId = "CREATING"`) blocks a double-click from creating two
-  shipments, and any failure after the provider has actually created
-  something is treated as uncertain (never automatically retried) and
-  flagged `shippingReconciliationRequired`. `pnpm reconcile:shipping`
-  reports all of that (forward, legacy whole-order return, and
-  item/quantity-level partial-return shipments) without retrying anything.
-  Historical Porter-provider shipments (dispatched before this migration,
+  `admin-serviceability.ts`, `pune-eligibility.ts`) — the rest of the app
+  depends only on `lib/shipping/service.ts`, never on a provider file
+  directly. Two providers are active at once, for different order shapes —
+  neither is "the" configured provider that gates the other:
+  - **Shiprocket** (`lib/shipping/providers/shiprocket.ts`) — long-haul
+    forward/reverse shipments: `createShipment`, `createReverseShipment`,
+    `assignAwb`, `schedulePickup`, `trackShipment`, `cancelShipment`,
+    `checkServiceability`, built against Shiprocket's documented External
+    API v1 (auth/login, orders/create/adhoc, orders/create/return,
+    courier/assign/awb, courier/generate/pickup, courier/track/awb,
+    orders/cancel, courier/serviceability). Auth token is cached in-memory
+    (~9 days, refreshed on a 401) — never re-authenticates per request.
+  - **Borzo** (`lib/shipping/providers/borzo.ts`) — same-city local
+    delivery, currently gated to Pune-to-Pune orders only
+    (`checkLocalDeliveryEligibility` in `pune-eligibility.ts`, comparing
+    normalized `WAREHOUSE_CITY` against the order's delivery-address city):
+    `quoteLocalDelivery`, `createLocalDelivery`, `trackLocalDelivery`,
+    `cancelLocalDelivery`. No AWB/label/pickup-scheduling step — Borzo's
+    create call returns an assigned courier directly. Auth is a static
+    `X-DV-Auth-Token` header (`BORZO_API_TOKEN`), no login/token-refresh
+    step. Status mapping (`mapBorzoStatusToOrderStatus`) uses only the
+    confirmed order-level Borzo statuses (`new/available/active/delayed/
+    completed/cancelled`) as ground truth; point-level status strings are
+    used only as a documented best-effort upgrade to detect
+    `OUT_FOR_DELIVERY` early, since Borzo's point-level status vocabulary
+    isn't fully confirmed from public docs. Borzo webhooks are not
+    implemented — the callback payload/verification method isn't
+    confirmed either, so tracking is refresh-on-demand (admin "Refresh
+    Tracking" button) rather than push-based; this is a documented gap to
+    revisit once Borzo's webhook docs are confirmed, not a guess.
+
+  Both providers' dispatch (forward and reverse, Shiprocket; create,
+  Borzo) uses the same claim-before-mutate pattern as the old Porter
+  dispatch: a placeholder (`shippingOrderId = "CREATING"`) blocks a
+  double-click from creating two shipments/deliveries — the same
+  `shippingOrderId` field is the claim for both providers, so a Shiprocket
+  dispatch and a Borzo delivery creation can never both win on the same
+  order. Any failure after the provider has actually created something is
+  treated as uncertain (never automatically retried) and flagged
+  `shippingReconciliationRequired`. Both providers write into the same
+  generic `Order` fields (`shippingProvider/OrderId/Status/CourierName/
+  TrackingUrl`) rather than duplicating provider-specific columns; Borzo
+  additionally populates `deliveryExecutiveName/Phone`,
+  `shippingLastUpdatedAt`, and `shippingEstimatedDeliveryAt` when Borzo's
+  response genuinely includes them — never fabricated, and never set for
+  Shiprocket/Porter rows. `shippingAwbCode` is always left `null` for Borzo
+  orders since Borzo has no equivalent concept. `pnpm reconcile:shipping`
+  reports all of that (Shiprocket forward, Borzo forward, legacy
+  whole-order return, and item/quantity-level partial-return shipments,
+  each in its own section) without retrying anything. Historical
+  Porter-provider shipments (dispatched before the Shiprocket migration,
   `shippingProvider = "PORTER"`) remain trackable/cancellable through the
-  frozen `lib/porter.ts` — never re-dispatched through Shiprocket.
+  frozen `lib/porter.ts` — never re-dispatched through Shiprocket or Borzo.
+  Returns are not implemented for Borzo yet — reverse/partial-return flows
+  stay on the existing Shiprocket-based logic regardless of how the order
+  was forward-shipped, until Borzo's return-pickup API is verified.
 - **First-time setup**:
   ```bash
-  # fill in DATABASE_URL, RAZORPAY_KEY_ID/SECRET, SHIPROCKET_EMAIL/PASSWORD/PICKUP_LOCATION in .env.local
+  # fill in DATABASE_URL, RAZORPAY_KEY_ID/SECRET, SHIPROCKET_EMAIL/PASSWORD/PICKUP_LOCATION,
+  # BORZO_API_BASE_URL/BORZO_API_TOKEN, WAREHOUSE_CITY in .env.local
   pnpm db:migrate    # creates tables from prisma/schema.prisma
   pnpm dev
   # visit /admin/login with ADMIN_EMAIL / ADMIN_PASSWORD from .env.local

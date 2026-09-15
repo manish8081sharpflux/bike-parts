@@ -90,3 +90,21 @@ export function buildPackage(lines: PackageLineItem[]): BuiltPackage {
     usesRealDimensions: false,
   };
 }
+
+/**
+ * Borzo's calculate/create-order requests only take a total weight — no
+ * length/breadth/height field exists in its documented request shape (see
+ * lib/shipping/providers/borzo.ts) — so local-delivery quotes/bookings use
+ * this instead of buildPackage, rather than demanding dimensions Borzo
+ * never asks for. Still never approximates weight itself: any line missing
+ * a shipping weight blocks the quote/booking, naming the product.
+ */
+export function calculateTotalWeightKg(lines: Pick<PackageLineItem, "productName" | "quantity" | "weightKg">[]): number {
+  const missingWeight = lines.find((line) => line.weightKg === null || line.weightKg <= 0);
+  if (missingWeight) {
+    throw new PackageBuildError(
+      `"${missingWeight.productName}" has no shipping weight configured. Set it in the product's Pricing & Inventory section before creating a shipment.`
+    );
+  }
+  return lines.reduce((sum, line) => sum + (line.weightKg as number) * line.quantity, 0);
+}

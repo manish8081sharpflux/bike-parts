@@ -47,6 +47,13 @@ const platformEnvSchema = z.object({
   SHIPROCKET_PASSWORD: z.string().optional(),
   SHIPROCKET_API_BASE_URL: z.string().optional(),
   SHIPROCKET_PICKUP_LOCATION: z.string().optional(),
+  // Local Pune same-city courier — see lib/shipping/providers/borzo.ts and
+  // lib/shipping/pune-eligibility.ts. WAREHOUSE_CITY is also declared below
+  // (already existed for the Shiprocket pickup address) but is reused as
+  // the eligibility check's warehouse-side city.
+  BORZO_API_BASE_URL: z.string().optional(),
+  BORZO_API_TOKEN: z.string().optional(),
+  WAREHOUSE_CITY: z.string().optional(),
   ADMIN_EMAIL: z.string().optional(),
   ADMIN_PASSWORD: z.string().optional(),
   ADMIN_SESSION_SECRET: z.string().optional(),
@@ -274,6 +281,17 @@ export function getPlatformServices(): ServiceStatus[] {
       requiredInProduction: false,
       installed: true,
       note: "Generic shipping service (lib/shipping/service.ts) with Shiprocket as the active provider (lib/shipping/providers/shiprocket.ts) — auth/token caching, order creation, AWB, pickup, tracking, cancellation, reverse shipments. Historical Porter-provider shipments (dispatched before this migration) remain readable/cancellable via the frozen lib/porter.ts, but no new shipment is ever created through Porter.",
+    },
+    {
+      name: "Borzo local delivery",
+      group: "backend",
+      requiredEnv: ["BORZO_API_BASE_URL", "BORZO_API_TOKEN", "WAREHOUSE_CITY"],
+      // Only load-bearing for Pune local orders, which are a subset of
+      // overall order volume — Shiprocket above remains the requirement
+      // that gates general shipping health.
+      requiredInProduction: false,
+      installed: true,
+      note: "Same-city courier for Pune-to-Pune orders only (lib/shipping/providers/borzo.ts, lib/shipping/pune-eligibility.ts) — quote/create/track/cancel, no AWB/label/pickup-scheduling workflow. Currently pointed at Borzo's test API; do not switch BORZO_API_BASE_URL to production until a test account, token, and 2 completed test orders are approved by Borzo.",
     },
     {
       name: "Admin panel",

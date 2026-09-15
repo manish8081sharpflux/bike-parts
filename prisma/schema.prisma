@@ -38,17 +38,24 @@ enum PaymentStatus {
   REFUNDED
 }
 
-// Which courier/logistics provider a shipment record belongs to. The active,
-// configurable provider the app can create NEW shipments through today is
-// Shiprocket (see lib/shipping/ — SHIPPING_PROVIDER env var); PORTER exists
+// Which courier/logistics provider a shipment record belongs to.
+// SHIPROCKET handles long-haul/pan-India forward shipments and reverse
+// returns (create -> AWB -> pickup — see lib/shipping/service.ts's
+// createShipment/assignAwb/schedulePickup). BORZO is a same-city local
+// courier used only for Pune-to-Pune forward deliveries (see
+// checkLocalDeliveryEligibility/createLocalDelivery in
+// lib/shipping/service.ts) — it has no AWB/label concept, so never force a
+// Borzo row through the Shiprocket-shaped fields (shippingAwbCode stays
+// null unless Borzo genuinely has an equivalent identifier). PORTER exists
 // only so historical rows from before the Shiprocket migration keep an
 // honest, queryable record of which provider actually handled them. Never
-// write PORTER for a new shipment, and never re-dispatch a PORTER row
-// through Shiprocket — see lib/shipping/service.ts and the migration note on
-// Order.shippingProvider below.
+// write PORTER for a new shipment, and never re-dispatch a PORTER or
+// SHIPROCKET row through Borzo (or vice versa) — each provider's rows are
+// only ever driven by that same provider's own tracking/cancel calls.
 enum ShippingProvider {
   PORTER
   SHIPROCKET
+  BORZO
 }
 
 // Tracks a customer-initiated refund request end to end, independent of the
@@ -281,6 +288,16 @@ model Order {
   shippingCourierName                  String?
   shippingStatus                       String?
   shippingTrackingUrl                  String?
+  // Set only from a real provider response — never fabricated. Borzo (local
+  // Pune delivery) is the first provider that genuinely returns a live
+  // courier/rider and a per-update timestamp; Shiprocket/Porter rows simply
+  // leave these null (see lib/shipping/providers/borzo.ts,
+  // ShipmentComponents.tsx's Delivery Executive block, and
+  // lib/order-tracking.ts's lastTrackingUpdate/expectedDelivery).
+  deliveryExecutiveName                String?
+  deliveryExecutivePhone               String?
+  shippingLastUpdatedAt                DateTime?
+  shippingEstimatedDeliveryAt          DateTime?
   shippingReconciliationRequired       Boolean           @default(false)
   shippingLastError                    String?
   shippingAttemptedAt                  DateTime?

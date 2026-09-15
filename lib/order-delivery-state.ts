@@ -32,18 +32,34 @@ export async function cancelAdminOrderBeforeDispatch(orderId: string, adminNote:
   });
 }
 
+export type ProviderTrackingFields = {
+  shippingStatus?: string;
+  shippingTrackingUrl?: string | null;
+  shippingCourierName?: string | null;
+  deliveryExecutiveName?: string | null;
+  deliveryExecutivePhone?: string | null;
+  shippingLastUpdatedAt?: Date;
+};
+
 /**
- * Applies a raw provider status string for the FORWARD shipment. Only ever
- * called for a Shiprocket-backed order (see refreshDeliveryStatusAction in
- * admin-orders.ts, which branches on shippingProvider and calls the legacy
- * Porter tracking path instead for historical PORTER rows) — the status
- * vocabulary is provider-specific, so mapShiprocketStatusToOrderStatus (see
- * lib/shipping/status-mapping.ts) is the only mapper used here.
+ * Shared core for every provider's tracking-refresh path (Shiprocket, Borzo,
+ * and the legacy Porter branch in admin-orders.ts) — writes whatever
+ * provider-specific fields the caller passes, then applies the one standard
+ * allowed-previous-state transition guard and logs exactly one STATUS_CHANGE
+ * event, all in a single transaction. Centralizing the transition rules
+ * here (rather than reimplementing them per provider) is what the app's
+ * "don't duplicate status logic" rule calls for — each provider only ever
+ * needs to supply its own raw-status mapper and field set.
  */
-export async function applyShippingStatus(orderId: string, rawStatus: string) {
+export async function applyProviderTrackingUpdate(
+  orderId: string,
+  mapped: OrderStatus | null,
+  rawStatus: string,
+  providerLabel: string,
+  fields: ProviderTrackingFields
+) {
   return prisma.$transaction(async (tx) => {
-    const mapped = mapShiprocketStatusToOrderStatus(rawStatus);
-    await tx.order.update({ where: { id: orderId }, data: { shippingStatus: rawStatus } });
+    await tx.order.update({ where: { id: orderId }, data: fields });
     if (!mapped) return { mappedStatus: null, transitioned: false };
 
     const allowedPrevious: Record<string, OrderStatus[]> = {
@@ -56,10 +72,23 @@ export async function applyShippingStatus(orderId: string, rawStatus: string) {
       data: { status: mapped },
     });
     if (transitioned.count === 1) {
-      await tx.orderEvent.create({ data: { orderId, type: "STATUS_CHANGE", message: `Status changed to ${ORDER_STATUS_LABELS[mapped] ?? mapped} (shipping status "${rawStatus}")` } });
+      await tx.orderEvent.create({ data: { orderId, type: "STATUS_CHANGE", message: `Status changed to ${ORDER_STATUS_LABELS[mapped] ?? mapped} (${providerLabel} status "${rawStatus}")` } });
     }
     return { mappedStatus: mapped, transitioned: transitioned.count === 1 };
   });
+}
+
+/**
+ * Applies a raw Shiprocket status string for the FORWARD shipment. Only
+ * ever called for a Shiprocket-backed order (see refreshDeliveryStatusAction
+ * in admin-orders.ts, which branches on shippingProvider — the legacy
+ * Porter and Borzo paths use their own mappers and call
+ * applyProviderTrackingUpdate directly, since each provider's status
+ * vocabulary and available fields differ).
+ */
+export async function applyShippingStatus(orderId: string, rawStatus: string) {
+  const mapped = mapShiprocketStatusToOrderStatus(rawStatus);
+  return applyProviderTrackingUpdate(orderId, mapped, rawStatus, "shipping", { shippingStatus: rawStatus });
 }
 
 /**

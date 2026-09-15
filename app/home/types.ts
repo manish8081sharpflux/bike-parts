@@ -114,6 +114,9 @@ export type PartialReturnStatus =
 /** Mirrors the DB's OrderReturnRefundStatus enum. */
 export type PartialRefundStatus = "none" | "requested" | "processing" | "refunded" | "failed";
 
+/** Mirrors the DB's ShippingProvider enum — SHIPROCKET (long-haul) and BORZO (local Pune delivery) are active; PORTER only ever appears on historical rows dispatched before the Shiprocket migration. */
+export type ShippingProviderName = "PORTER" | "SHIPROCKET" | "BORZO";
+
 export type PartialReturnLine = { orderItemId: string; quantity: number; productName: string };
 
 /** One item/quantity-level return request — see OrderReturn in the DB. */
@@ -126,7 +129,7 @@ export type PartialReturn = {
   approvedAt: number | null;
   receivedAt: number | null;
   condition: "RESELLABLE" | "DAMAGED" | null;
-  shippingProvider: "PORTER" | "SHIPROCKET" | null;
+  shippingProvider: ShippingProviderName | null;
   shippingStatus: string | null;
   shippingTrackingUrl: string | null;
   shippingAwbCode: string | null;
@@ -166,7 +169,7 @@ export type Order = {
   /** Whether this order was actually paid for — a refund only ever makes sense against a paid order. */
   isPaid: boolean;
   /** Real, provider-backed forward-shipment info — "PORTER" only ever appears on historical orders dispatched before the Shiprocket migration (see the Prisma ShippingProvider enum). Used by provider-neutral shipment cards. */
-  shippingProvider: "PORTER" | "SHIPROCKET" | null;
+  shippingProvider: ShippingProviderName | null;
   shippingStatus: string | null;
   shippingTrackingUrl: string | null;
   shippingAwbCode: string | null;
@@ -181,7 +184,7 @@ export type Order = {
   returnReason: string | null;
   returnAdminNote: string | null;
   returnRequestedAt: number | null;
-  returnShippingProvider: "PORTER" | "SHIPROCKET" | null;
+  returnShippingProvider: ShippingProviderName | null;
   returnShippingTrackingUrl: string | null;
   returnShippingAwbCode: string | null;
   returnShippingCourierName: string | null;

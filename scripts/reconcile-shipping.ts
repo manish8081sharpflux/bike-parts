@@ -1,15 +1,16 @@
 /**
  * Read-only report of shipments stuck in an uncertain state — across
- * forward shipments, legacy whole-order return shipments, and
- * item/quantity-level partial-return shipments — plus any historical Porter
- * shipments still flagged for reconciliation. Never retries shipment/AWB/
- * pickup/cancellation creation itself (an uncertain attempt may have
- * actually succeeded on the provider's side; blindly retrying risks a
- * duplicate shipment or AWB). Safe to run repeatedly/on a schedule: it only
- * reads.
+ * forward Shiprocket shipments, forward Borzo local deliveries, legacy
+ * whole-order return shipments, and item/quantity-level partial-return
+ * shipments — plus any historical Porter shipments still flagged for
+ * reconciliation. Never retries shipment/AWB/pickup/delivery/cancellation
+ * creation itself (an uncertain attempt may have actually succeeded on the
+ * provider's side; blindly retrying risks a duplicate shipment or booking).
+ * Safe to run repeatedly/on a schedule: it only reads.
  *
  * Replaces the old scripts/reconcile-porter.ts (pnpm reconcile:porter) now
- * that Shiprocket is the active shipping provider — see lib/shipping/.
+ * that Shiprocket (long-haul) and Borzo (local Pune delivery) are the
+ * active shipping providers — see lib/shipping/.
  *
  * Usage: pnpm reconcile:shipping
  */
@@ -81,19 +82,24 @@ async function main() {
   });
 
   // Historical Porter-provider rows are never re-dispatched through
-  // Shiprocket (see the migration note on Order.shippingProvider) — but a
-  // PORTER row can still legitimately need reconciliation from before the
-  // migration, or if the legacy tracking/cancel path (lib/porter.ts,
-  // branched to from lib/actions/admin-orders.ts) hits an uncertain outcome
-  // after the cutover. Reported separately so it's clear these are Porter,
-  // not Shiprocket, candidates.
+  // Shiprocket or Borzo (see the migration note on Order.shippingProvider)
+  // — but a PORTER row can still legitimately need reconciliation from
+  // before the migration, or if the legacy tracking/cancel path
+  // (lib/porter.ts, branched to from lib/actions/admin-orders.ts) hits an
+  // uncertain outcome after the cutover. Reported separately, and Borzo
+  // (local Pune delivery) reported separately again, so it's always clear
+  // which provider a candidate belongs to.
   const legacyPorterForward = forwardShipments.filter((row) => row.shippingProvider === "PORTER");
   const legacyPorterReturn = legacyReturnShipments.filter((row) => row.returnShippingProvider === "PORTER");
-  const shiprocketForward = forwardShipments.filter((row) => row.shippingProvider !== "PORTER");
+  const borzoForward = forwardShipments.filter((row) => row.shippingProvider === "BORZO");
+  const shiprocketForward = forwardShipments.filter((row) => row.shippingProvider !== "PORTER" && row.shippingProvider !== "BORZO");
   const shiprocketLegacyReturn = legacyReturnShipments.filter((row) => row.returnShippingProvider !== "PORTER");
 
   console.log(`\nForward shipments needing reconciliation — Shiprocket (${shiprocketForward.length}):`);
   console.table(shiprocketForward);
+
+  console.log(`\nForward local deliveries needing reconciliation — Borzo (${borzoForward.length}):`);
+  console.table(borzoForward);
 
   console.log(`\nLegacy whole-order return shipments needing reconciliation — Shiprocket (${shiprocketLegacyReturn.length}):`);
   console.table(shiprocketLegacyReturn);

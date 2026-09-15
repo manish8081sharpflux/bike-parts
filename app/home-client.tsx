@@ -17,6 +17,7 @@ import type {
   PersistedView,
   RazorpayCheckoutOptions,
   RazorpayPaymentResponse,
+  ShippingProviderName,
 } from "./home/types";
 import {
   CART_STORAGE_KEY,
@@ -865,11 +866,15 @@ export function HomeClient({ products }: { products: Product[] }) {
           amount: number;
           shippingOrderId: string | null;
           shippingShipmentId: string | null;
-          shippingProvider: "PORTER" | "SHIPROCKET" | null;
+          shippingProvider: ShippingProviderName | null;
           shippingStatus: string | null;
           shippingTrackingUrl: string | null;
           shippingAwbCode: string | null;
           shippingCourierName: string | null;
+          deliveryExecutiveName: string | null;
+          deliveryExecutivePhone: string | null;
+          shippingLastUpdatedAt: string | null;
+          shippingEstimatedDeliveryAt: string | null;
           deliveryAddress: Partial<Address> | null;
           items: Array<{ id: string; listingId: string | null; canReview: boolean; review: CustomerReview | null; name: string; image: string | null; quantity: number; unitPrice: number; returnedQuantity: number; remainingReturnable: number }>;
           events: OrderEventEntry[];
@@ -883,7 +888,7 @@ export function HomeClient({ products }: { products: Product[] }) {
           returnReason: string | null;
           returnAdminNote: string | null;
           returnRequestedAt: number | null;
-          returnShippingProvider: "PORTER" | "SHIPROCKET" | null;
+          returnShippingProvider: ShippingProviderName | null;
           returnShippingTrackingUrl: string | null;
           returnShippingAwbCode: string | null;
           returnShippingCourierName: string | null;
@@ -897,7 +902,7 @@ export function HomeClient({ products }: { products: Product[] }) {
             approvedAt: number | null;
             receivedAt: number | null;
             condition: "RESELLABLE" | "DAMAGED" | null;
-            shippingProvider: "PORTER" | "SHIPROCKET" | null;
+            shippingProvider: ShippingProviderName | null;
             shippingStatus: string | null;
             shippingTrackingUrl: string | null;
             shippingAwbCode: string | null;
@@ -982,6 +987,10 @@ export function HomeClient({ products }: { products: Product[] }) {
             shippingTrackingUrl: dbOrder.shippingTrackingUrl,
             shippingAwbCode: dbOrder.shippingAwbCode,
             shippingCourierName: dbOrder.shippingCourierName,
+            deliveryExecutiveName: dbOrder.deliveryExecutiveName,
+            deliveryExecutivePhone: dbOrder.deliveryExecutivePhone,
+            shippingLastUpdatedAt: dbOrder.shippingLastUpdatedAt,
+            shippingEstimatedDeliveryAt: dbOrder.shippingEstimatedDeliveryAt,
             refundStatus: mapDbRefundStatus(dbOrder.refundStatus),
             refundReason: dbOrder.refundReason,
             refundAdminNote: dbOrder.refundAdminNote,

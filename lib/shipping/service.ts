@@ -1,19 +1,40 @@
 /**
  * Generic shipping service — the ONLY module the rest of the app (order
  * state machines, admin actions, UI) should import for shipping
- * functionality. It resolves the configured provider and delegates to that
- * provider's implementation; nothing outside lib/shipping/ should import
- * from lib/shipping/providers/* directly.
+ * functionality. Nothing outside lib/shipping/ should import from
+ * lib/shipping/providers/* directly.
  *
- * Today there is exactly one real provider (Shiprocket), selected via
- * SHIPPING_PROVIDER=SHIPROCKET. A second provider would mean adding a file
- * under providers/, a branch in resolveProvider() below, and nothing else —
- * Order/OrderReturn's shippingProvider column already stores the provider
- * name per-shipment specifically so historical shipments (including
- * pre-migration "PORTER" rows — see the Prisma ShippingProvider enum and the
- * migration note on Order.shippingProvider) remain distinguishable forever.
+ * Two provider "shapes" exist side by side, deliberately not forced into
+ * one abstraction (see Part 5 of the Borzo integration task):
+ *
+ *  - Long-haul / pan-India forward shipments and reverse returns —
+ *    Shiprocket's create→AWB→pickup flow (createShipment/assignAwb/
+ *    schedulePickup/createReverseShipment/checkServiceability/
+ *    trackShipment/cancelShipment). These always use Shiprocket regardless
+ *    of SHIPPING_PROVIDER, so non-local orders keep shipping normally even
+ *    once Borzo is configured as the default for local Pune deliveries —
+ *    Shiprocket has no equivalent for what SHIPPING_PROVIDER=BORZO would
+ *    otherwise gate.
+ *  - Local, same-city delivery — Borzo's quote→create→track→cancel flow
+ *    (quoteLocalDelivery/createLocalDelivery/trackLocalDelivery/
+ *    cancelLocalDelivery), only ever offered for Pune-to-Pune orders (see
+ *    lib/shipping/pune-eligibility.ts). Borzo has no AWB/label concept, so
+ *    it is never routed through the Shiprocket-shaped functions above.
+ *
+ * getConfiguredProvider()/SHIPPING_PROVIDER pick which provider is treated
+ * as the store's "primary/default" for admin-dashboard messaging — it does
+ * NOT gate which of the two flows above is callable; that's determined by
+ * which flow's functions you call and (for Borzo) Pune eligibility.
+ *
+ * Order/OrderReturn's shippingProvider column stores the provider name
+ * per-shipment specifically so historical shipments (including
+ * pre-Shiprocket-migration "PORTER" rows — see the Prisma ShippingProvider
+ * enum and the migration note on Order.shippingProvider) remain
+ * distinguishable forever.
  */
 import * as shiprocket from "./providers/shiprocket";
+import * as borzo from "./providers/borzo";
+import { checkLocalDeliveryEligibility as checkPuneEligibility, type LocalDeliveryEligibility } from "./pune-eligibility";
 import type {
   AwbResult,
   CancelShipmentResult,
@@ -21,6 +42,9 @@ import type {
   CourierOption,
   CreateShipmentInput,
   CreateShipmentResult,
+  LocalDeliveryInput,
+  LocalDeliveryQuote,
+  LocalDeliveryResult,
   PickupResult,
   ReverseShipmentInput,
   ShippingProvider,
@@ -28,70 +52,132 @@ import type {
 } from "./types";
 
 export { ShippingProviderError } from "./providers/shiprocket";
+export { BorzoRequestError } from "./providers/borzo";
 export * from "./types";
+export { normalizeCityName } from "./pune-eligibility";
+export type { LocalDeliveryEligibility } from "./pune-eligibility";
 
 function resolveProvider(): ShippingProvider {
   const configured = (process.env.SHIPPING_PROVIDER || "SHIPROCKET").toUpperCase();
-  if (configured !== "SHIPROCKET") {
-    throw new Error(`Unsupported SHIPPING_PROVIDER "${configured}". Only SHIPROCKET is implemented today.`);
+  if (configured !== "SHIPROCKET" && configured !== "BORZO") {
+    throw new Error(`Unsupported SHIPPING_PROVIDER "${configured}". Only SHIPROCKET and BORZO are implemented today.`);
   }
-  return "SHIPROCKET";
+  return configured as ShippingProvider;
 }
 
+/** The store's configured "primary/default" provider — informational (admin dashboard, health), not a gate on which flow below is callable. */
 export function getConfiguredProvider(): ShippingProvider {
   return resolveProvider();
 }
 
+/** True when at least one provider (Shiprocket for long-haul, Borzo for local) is usable. */
 export function isShippingConfigured(): boolean {
-  try {
-    return resolveProvider() === "SHIPROCKET" && shiprocket.isShiprocketConfigured();
-  } catch {
-    return false;
-  }
+  return shiprocket.isShiprocketConfigured() || borzo.isBorzoConfigured();
+}
+
+export function isShiprocketConfigured(): boolean {
+  return shiprocket.isShiprocketConfigured();
 }
 
 export function assertShippingConfigured(): void {
-  resolveProvider();
   shiprocket.assertShiprocketConfigured();
 }
 
 export async function checkServiceability(input: CheckServiceabilityInput): Promise<CourierOption[]> {
-  resolveProvider();
   return shiprocket.checkServiceability(input);
 }
 
-/** Creates a forward shipment for a paid order. */
+/** Creates a long-haul forward shipment for a paid order via Shiprocket. */
 export async function createShipment(input: CreateShipmentInput): Promise<CreateShipmentResult> {
-  resolveProvider();
   return shiprocket.createForwardShipment(input);
 }
 
-/** Creates a reverse shipment for a return — pickup = customer address, drop = warehouse. Only ever pass the returned items/quantities, never the full order (see lib/order-returns/service.ts). */
+/** Creates a reverse shipment for a return — pickup = customer address, drop = warehouse. Only ever pass the returned items/quantities, never the full order (see lib/order-returns/service.ts). Always Shiprocket — Borzo returns are not implemented yet (see Part 20 of the Borzo integration task). */
 export async function createReverseShipment(input: ReverseShipmentInput): Promise<CreateShipmentResult> {
-  resolveProvider();
   return shiprocket.createReverseShipment(input);
 }
 
 export async function assignAwb(shippingShipmentId: string, courierCompanyId?: string): Promise<AwbResult> {
-  resolveProvider();
   return shiprocket.assignAwb(shippingShipmentId, courierCompanyId);
 }
 
 export async function schedulePickup(shippingShipmentId: string): Promise<PickupResult> {
-  resolveProvider();
   return shiprocket.generatePickup(shippingShipmentId);
 }
 
-/** Tracks a shipment, preferring the AWB (the provider's tracking granularity is per-AWB, not per-order) and falling back to the shipment id if no AWB exists yet. */
+/** Tracks a Shiprocket shipment, preferring the AWB (the provider's tracking granularity is per-AWB, not per-order) and falling back to the shipment id if no AWB exists yet. Only ever call this for a shippingProvider === "SHIPROCKET" row — use trackLocalDelivery for BORZO rows. */
 export async function trackShipment(identifiers: { awbCode?: string | null; shippingShipmentId?: string | null }): Promise<TrackingResult> {
-  resolveProvider();
   if (identifiers.awbCode) return shiprocket.trackByAwb(identifiers.awbCode);
   if (identifiers.shippingShipmentId) return shiprocket.trackByShipmentId(identifiers.shippingShipmentId);
   throw new Error("trackShipment requires an AWB code or a shipment id.");
 }
 
-/** Only attempt when the shipment's state actually allows cancellation (see the admin action for the exact allowed states) — the provider itself will also reject a cancellation past pickup. */
+/** Only attempt when the shipment's state actually allows cancellation (see the admin action for the exact allowed states) — Shiprocket itself will also reject a cancellation past pickup. Only for shippingProvider === "SHIPROCKET" rows — use cancelLocalDelivery for BORZO rows. */
 export async function cancelShipment(shippingOrderId: string): Promise<CancelShipmentResult> {
-  resolveProvider();
   return shiprocket.cancelOrder(shippingOrderId);
+}
+
+// ---------------------------------------------------------------------------
+// Local (same-city) delivery — Borzo, Pune-to-Pune only for now. Deliberately
+// a separate flow shape from the Shiprocket functions above (Part 5) — no
+// AWB, an explicit quote-before-booking step, and idempotency enforced by
+// the caller via the same shippingOrderId claim pattern used everywhere
+// else (see lib/order-delivery-state.ts).
+// ---------------------------------------------------------------------------
+
+export function isBorzoConfigured(): boolean {
+  return borzo.isBorzoConfigured();
+}
+
+export function assertBorzoConfigured(): void {
+  borzo.assertBorzoConfigured();
+}
+
+/** Pure, server-side eligibility check — both the warehouse and the customer's address must be Pune. Never trust a client-supplied "is this Pune" flag. */
+export function checkLocalDeliveryEligibility(warehouseCity: string | null | undefined, customerCity: string | null | undefined, customerPincode?: string | null): LocalDeliveryEligibility {
+  return checkPuneEligibility(warehouseCity, customerCity, customerPincode);
+}
+
+/** A price/ETA quote from Borzo — never creates a real delivery. Only ever shows a fee/ETA the provider actually returned (see LocalDeliveryQuote's doc comments) — never fabricated. */
+export async function quoteLocalDelivery(input: LocalDeliveryInput): Promise<LocalDeliveryQuote> {
+  const result = await borzo.calculateDelivery(input);
+  return {
+    provider: "BORZO",
+    deliveryFeeAmount: Number.isFinite(result.deliveryFeeAmount) ? result.deliveryFeeAmount : null,
+    estimatedDeliveryAt: null, // Borzo's calculate-order response doesn't return an absolute ETA timestamp in what's confirmed from the docs — never guessed here.
+    raw: result.raw,
+  };
+}
+
+/** Creates a real Borzo delivery order. */
+export async function createLocalDelivery(input: LocalDeliveryInput): Promise<LocalDeliveryResult> {
+  const result = await borzo.createDeliveryOrder(input);
+  return {
+    provider: "BORZO",
+    shippingOrderId: result.borzoOrderId,
+    status: result.status,
+    trackingUrl: result.trackingUrl,
+    courierName: result.courierName,
+    courierPhone: result.courierPhone,
+    raw: result.raw,
+  };
+}
+
+/** Re-fetches a Borzo delivery's current status/courier/tracking. */
+export async function trackLocalDelivery(borzoOrderId: string): Promise<LocalDeliveryResult> {
+  const result = await borzo.fetchDeliveryStatus(borzoOrderId);
+  return {
+    provider: "BORZO",
+    shippingOrderId: result.borzoOrderId,
+    status: result.status,
+    trackingUrl: result.trackingUrl,
+    courierName: result.courierName,
+    courierPhone: result.courierPhone,
+    raw: result.raw,
+  };
+}
+
+/** Cancels a Borzo delivery — only meaningful before pickup; Borzo itself rejects cancellation past that point with a definite (non-uncertain) error. */
+export async function cancelLocalDelivery(borzoOrderId: string): Promise<CancelShipmentResult> {
+  return borzo.cancelDelivery(borzoOrderId);
 }

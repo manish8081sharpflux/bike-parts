@@ -38,8 +38,15 @@ export function OrderStatusCard({ order }: { order: Order }) {
   </section>;
 }
 
+function providerDisplayName(provider: Order["shippingProvider"]) {
+  if (provider === "SHIPROCKET") return "Shiprocket";
+  if (provider === "BORZO") return "Borzo";
+  if (provider === "PORTER") return "Porter";
+  return null;
+}
+
 export function ShipmentDetails({ order }: { order: Order }) {
-  const provider = order.shippingProvider === "SHIPROCKET" ? "Shiprocket" : order.shippingProvider === "PORTER" ? "Porter" : null;
+  const provider = providerDisplayName(order.shippingProvider);
   const orderId = order.shippingOrderId && !["CREATING", "DISPATCHING"].includes(order.shippingOrderId) ? order.shippingOrderId : null;
   return <section aria-label="Shipment details" className="min-w-0 rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
     <h3 className="text-base font-bold text-[#070e2b]">Shipment Details</h3>
@@ -61,9 +68,11 @@ export function ShipmentDetails({ order }: { order: Order }) {
 
 export function ShipmentTracking({ order }: { order: Order }) {
   const url = safeTrackingUrl(order.shippingTrackingUrl);
+  const provider = providerDisplayName(order.shippingProvider);
   return <section aria-label="Shipment tracking" className="min-w-0 rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
     <h3 className="flex items-center gap-2 text-base font-bold text-[#070e2b]"><Truck size={19} className="text-orange-600" aria-hidden="true" />Shipment Tracking</h3>
-    {order.shippingProvider ? <p className="mt-1 text-xs text-zinc-500">{order.shippingProvider === "SHIPROCKET" ? "Powered by Shiprocket" : "Provider: Porter"}</p> : null}
+    {/* Only Shiprocket gets "Powered by" co-branding — Borzo and legacy Porter rows just state the provider plainly (Part 26: no Shiprocket branding on a Borzo delivery). */}
+    {provider ? <p className="mt-1 text-xs text-zinc-500">{provider === "Shiprocket" ? "Powered by Shiprocket" : `Provider: ${provider}`}</p> : null}
     <Rows rows={[["Courier Partner", order.shippingCourierName], ["AWB Number", order.shippingAwbCode], ["Current Status", shipmentStatus(order)], ["Last Update", lastTrackingUpdate(order)], ["Estimated Delivery", expectedDelivery(order)]]} />
     {url ? <a href={url} target="_blank" rel="noreferrer" className="mt-5 flex w-full items-center justify-center gap-2 rounded-lg bg-[#ff4b1f] px-4 py-3 text-sm font-semibold text-white hover:bg-[#e83b11]">Track Shipment<ExternalLink size={15} aria-hidden="true" /></a> : <p className="mt-4 text-xs text-zinc-500">{order.shippingAwbCode ? "Use the AWB above when contacting the courier." : "Tracking details will appear when available."}</p>}
   </section>;
