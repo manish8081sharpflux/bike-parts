@@ -5,6 +5,8 @@ import { deleteProductAction } from "@/lib/actions/admin-products";
 import { formatInr } from "@/lib/format";
 import { AdminPagination, parsePage } from "../admin-pagination";
 import { AutoSubmitFilterForm } from "../auto-submit-filter-form";
+import { DeleteConfirmButton } from "../DeleteConfirmButton";
+import { SuccessPopup } from "../SuccessPopup";
 
 export const dynamic = "force-dynamic";
 
@@ -37,9 +39,11 @@ export default async function AdminProductsPage({
     status?: string;
     stock?: string;
     model?: string;
+    created?: string;
+    updated?: string;
   }>;
 }) {
-  const { q, page: pageRaw, brand, category, status, stock, model } = await searchParams;
+  const { q, page: pageRaw, brand, category, status, stock, model, created, updated } = await searchParams;
   const query = q?.trim();
   const brandFilter = brand?.trim() || undefined;
   const categoryFilter = category?.trim() || undefined;
@@ -128,6 +132,10 @@ export default async function AdminProductsPage({
 
   return (
     <div className="flex flex-col gap-4">
+      <SuccessPopup
+        show={created === "1" || updated === "1"}
+        message={created === "1" ? "Product created successfully." : "Product updated successfully."}
+      />
       <div className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-black">Products</h1>
@@ -301,15 +309,15 @@ export default async function AdminProductsPage({
                   <div className="flex items-center gap-3">
                     <Link
                       href={`/admin/products/${product.id}`}
-                      className="text-xs font-bold text-[#ff4b1f]"
+                      className="inline-flex h-8 items-center justify-center rounded-lg border border-zinc-200 px-3 text-xs font-bold text-zinc-700 transition hover:border-orange-200 hover:bg-orange-50 hover:text-orange-700"
                     >
                       Edit
                     </Link>
-                    <form action={deleteProductAction.bind(null, product.id)}>
-                      <button type="submit" className="text-xs font-bold text-zinc-400 hover:text-red-600">
-                        Delete
-                      </button>
-                    </form>
+                    <DeleteConfirmButton
+                      itemLabel={product.name}
+                      title="Delete this product?"
+                      action={deleteProductAction.bind(null, product.id)}
+                    />
                   </div>
                 </td>
               </tr>

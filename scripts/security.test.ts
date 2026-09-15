@@ -57,6 +57,31 @@ test("generic limiter returns 429 with Retry-After and keeps buckets independent
   await assert.doesNotReject(() => assertRateLimit("two", { limit: 1, windowMs: 10_000 }));
 });
 
+test("unreachable Redis permits local admin login while still blocking the sixth attempt", async () => {
+  process.env.REDIS_URL = "redis://127.0.0.1:1";
+  for (let i = 0; i < 5; i++) await assertAdminLoginRateLimit("offline@example.com", null);
+  await assert.rejects(() => assertAdminLoginRateLimit("offline@example.com", null), RateLimitExceededError);
+});
+
+test("concurrent local requests share a failed Redis connection and log one warning", async () => {
+  process.env.REDIS_URL = "redis://127.0.0.1:1";
+  const warnings: unknown[][] = [];
+  const originalWarn = console.warn;
+  console.warn = (...args) => { warnings.push(args); };
+  try {
+    await Promise.all(Array.from({ length: 5 }, (_, index) => assertRateLimit(`offline-${index}`, { limit: 2, windowMs: 10_000 })));
+    await assertRateLimit("offline-next", { limit: 2, windowMs: 10_000 });
+    assert.equal(warnings.length, 1);
+    assert.match(String(warnings[0][0]), /in-memory/);
+  } finally { console.warn = originalWarn; resetRateLimitsForTests(); }
+});
+
+test("configured but unreachable Redis still fails closed in production", async () => {
+  Object.assign(process.env, { NODE_ENV: "production", REDIS_URL: "redis://127.0.0.1:1" });
+  await assert.rejects(() => assertRateLimit("offline-production", { limit: 2, windowMs: 10_000 }), RateLimitUnavailableError);
+  await assert.rejects(() => assertAdminLoginRateLimit("admin@example.com", null), RateLimitUnavailableError);
+});
+
 test("production admin session secret validation rejects weak values and accepts a strong value", () => {
   for (const secret of [undefined, "secret", "changeme", "short"] as const) {
     assert.throws(() => validateAdminSessionSecret(secret, true));

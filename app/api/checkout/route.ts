@@ -10,6 +10,7 @@ import {
 import { calculateCheckoutTotals } from "@/lib/checkout-amount";
 import { getCustomerSession } from "@/lib/auth/customer-session";
 import { enforceApiRateLimit, rejectInvalidJsonRequest } from "@/lib/security/api-protection";
+import { quoteCheckoutDelivery } from "@/lib/checkout-delivery";
 
 type CheckoutItem = {
   id: string;
@@ -111,7 +112,7 @@ export async function POST(request: Request) {
   });
   const catalogById = new Map(catalogItems.map((item) => [item.id, item]));
 
-  const resolvedItems: Array<{ id: string; name: string; image?: string; price: number; gstRate: number; quantity: number }> = [];
+  const resolvedItems: Array<{ id: string; name: string; image?: string; price: number; gstRate: number; quantity: number; weightKg: number | null }> = [];
   for (const raw of body.items) {
     const quantity = Number(raw?.quantity);
     const catalogItem = raw && typeof raw.id === "string" ? catalogById.get(raw.id) : undefined;
@@ -128,11 +129,13 @@ export async function POST(request: Request) {
       price: Number(catalogItem.price),
       gstRate: Number(catalogItem.gstRate),
       quantity: Math.floor(quantity),
+      weightKg: catalogItem.weightKg != null ? Number(catalogItem.weightKg) : null,
     });
   }
 
+  const realDelivery = await quoteCheckoutDelivery(savedAddress, resolvedItems);
   const { itemsTotal, taxAmount, deliveryCharge, discount, amount } =
-    calculateCheckoutTotals(resolvedItems);
+    calculateCheckoutTotals(resolvedItems, realDelivery.amount);
 
   // Reserve stock and create the order in one transaction. If either fails,
   // PostgreSQL rolls back the reservation and all order/customer mutations.

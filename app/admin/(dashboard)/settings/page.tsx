@@ -1,3 +1,4 @@
+import { AdminActionForm } from "../admin-feedback";
 import { requireAdminPage } from "@/lib/auth/require-admin";
 import { getStoreSettings, updateStoreSettingsAction } from "@/lib/actions/admin-settings";
 
@@ -36,7 +37,7 @@ export default async function AdminSettingsPage({
           Shown to customers on invoices, order updates, and support contact.
         </p>
 
-        <form
+        <AdminActionForm
           action={updateStoreSettingsAction}
           className="mt-4 flex max-w-xl flex-col gap-3"
         >
@@ -103,7 +104,7 @@ export default async function AdminSettingsPage({
           >
             Save settings
           </button>
-        </form>
+        </AdminActionForm>
       </div>
 
       <div className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-zinc-100">

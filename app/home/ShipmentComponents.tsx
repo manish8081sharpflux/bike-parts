@@ -1,9 +1,21 @@
 "use client";
 
+import { lazy, Suspense } from "react";
 import { Check, ExternalLink, Package, Phone, Truck, User } from "lucide-react";
 import type { Order } from "./types";
 import { expectedDelivery, formatTrackingDate, getTrackingSteps, lastTrackingUpdate, safeTrackingUrl, shipmentStatus } from "@/lib/order-tracking";
-import { buildMapEmbedUrl } from "./utils";
+import { formatInr } from "@/lib/format";
+
+/**
+ * Lazy-loaded: leaflet touches `window` at import time and crashes outright
+ * under any non-browser render (Next's SSR pass, or this file's own
+ * pure-function tests via renderToStaticMarkup — see scripts/order-tracking.test.ts).
+ * React.lazy defers the actual `import()` until this component genuinely
+ * attempts to render on the client; wrapped in Suspense below so both SSR
+ * and renderToStaticMarkup synchronously render the fallback instead of
+ * ever reaching leaflet's module code.
+ */
+const DeliveryMap = lazy(() => import("./DeliveryMap").then((mod) => ({ default: mod.DeliveryMap })));
 
 function Rows({ rows }: { rows: Array<[string, string | null | undefined]> }) {
   return <dl className="mt-4 space-y-3 text-sm">{rows.filter(([, value]) => value?.trim()).map(([label, value]) =>
@@ -59,6 +71,12 @@ export function ShipmentDetails({ order }: { order: Order }) {
       [isBorzo ? "Borzo Order ID" : provider ? `Order ID (${provider})` : "Shipment Order ID", orderId],
       ["Shipment ID", order.shippingShipmentId], ["Current Status", shipmentStatus(order)],
       ["Last Update", lastTrackingUpdate(order)], ["Expected Delivery", expectedDelivery(order)],
+      // Real, committed provider fee only (Borzo today) — separate from
+      // deliveryCharge (what was actually paid at checkout). Never shown
+      // when the provider genuinely didn't return one.
+      ["Delivery Fee", order.shippingDeliveryFeeAmount != null ? formatInr(order.shippingDeliveryFeeAmount) : null],
+      // Borzo's own real driving-distance estimate between pickup and drop — never computed by this app.
+      ["Distance", order.shippingDistanceMeters != null ? `${(order.shippingDistanceMeters / 1000).toFixed(1)} km` : null],
     ]} />
     {hasExecutive ? <div className="mt-5 border-t border-zinc-100 pt-4">
       <h4 className="text-sm font-semibold text-[#070e2b]">Delivery Executive</h4>
@@ -89,22 +107,34 @@ export function ShipmentTracking({ order }: { order: Order }) {
   const url = safeTrackingUrl(order.shippingTrackingUrl);
   const provider = providerDisplayName(order.shippingProvider);
   const isBorzo = order.shippingProvider === "BORZO";
-  const hasLiveLocation = order.deliveryExecutiveLatitude != null && order.deliveryExecutiveLongitude != null;
+  const pickup = order.shippingPickupLatitude != null && order.shippingPickupLongitude != null
+    ? { lat: order.shippingPickupLatitude, lng: order.shippingPickupLongitude } : null;
+  const drop = order.shippingDropLatitude != null && order.shippingDropLongitude != null
+    ? { lat: order.shippingDropLatitude, lng: order.shippingDropLongitude } : null;
+  const rider = order.deliveryExecutiveLatitude != null && order.deliveryExecutiveLongitude != null
+    ? { lat: order.deliveryExecutiveLatitude, lng: order.deliveryExecutiveLongitude } : null;
+  const hasMapPoints = Boolean(pickup || drop || rider);
+  const distanceKm = order.shippingDistanceMeters != null ? (order.shippingDistanceMeters / 1000).toFixed(1) : null;
   return <section aria-label="Shipment tracking" className="min-w-0 rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
     <h3 className="flex items-center gap-2 text-base font-bold text-[#070e2b]"><Truck size={19} className="text-orange-600" aria-hidden="true" />{isBorzo ? "Live Delivery Tracking" : "Shipment Tracking"}</h3>
     {/* Only Shiprocket gets "Powered by" co-branding — Borzo and legacy Porter rows just state the provider plainly (Part 26: no Shiprocket branding on a Borzo delivery). */}
     {provider ? <p className="mt-1 text-xs text-zinc-500">{provider === "Shiprocket" ? "Powered by Shiprocket" : `Provider: ${provider}`}</p> : null}
-    {/* A real rider map only when Borzo actually returned live coordinates — never derived from an address, pincode, or city center (Part 7). */}
+    {/* A real map only from real Borzo-geocoded pickup/drop/rider coordinates — never derived from an address, pincode, or city center (Part 7). Pickup/drop appear as soon as the delivery is created; the rider marker joins once Borzo actually assigns one. */}
     {isBorzo ? (
-      hasLiveLocation ? (
-        <div className="mt-4 aspect-[4/3] w-full overflow-hidden rounded-lg border border-zinc-200">
-          <iframe
-            key={`${order.deliveryExecutiveLatitude},${order.deliveryExecutiveLongitude}`}
-            title="Rider location"
-            src={buildMapEmbedUrl({ lat: order.deliveryExecutiveLatitude!, lon: order.deliveryExecutiveLongitude! })}
-            className="h-full w-full border-0"
-            loading="lazy"
-          />
+      hasMapPoints ? (
+        <div className="mt-4">
+          <div className="aspect-[4/3] w-full overflow-hidden rounded-lg border border-zinc-200 bg-zinc-50">
+            <Suspense fallback={<div className="flex h-full items-center justify-center text-xs text-zinc-400">Loading map…</div>}>
+              <DeliveryMap pickup={pickup} drop={drop} rider={rider} />
+            </Suspense>
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-zinc-500">
+            {pickup ? <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-zinc-500" aria-hidden="true" />Pickup</span> : null}
+            {drop ? <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-[#ff4b1f]" aria-hidden="true" />Drop</span> : null}
+            {rider ? <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-emerald-500" aria-hidden="true" />Rider</span> : null}
+            {distanceKm ? <span className="ml-auto font-semibold text-zinc-700">Distance: {distanceKm} km</span> : null}
+          </div>
+          {!rider ? <p className="mt-2 text-xs text-zinc-500">Live courier location is not available yet.</p> : null}
         </div>
       ) : (
         <p className="mt-3 text-xs text-zinc-500">Live courier location is not available yet.</p>

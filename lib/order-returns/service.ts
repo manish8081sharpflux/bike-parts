@@ -2,7 +2,6 @@ import { Prisma, type ShippingProvider } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import type { ReturnCondition } from "@/lib/order-return-state";
-import { isShiprocketReversePickedUp } from "@/lib/shipping/status-mapping";
 
 export class PartialReturnError extends Error {
   constructor(message: string, public status: number) { super(message); }
@@ -221,11 +220,12 @@ export async function failPartialReturnShippingDispatch(returnId: string, failur
   });
 }
 
-export async function applyPartialReturnShippingStatus(returnId: string, rawStatus: string) {
+/** `pickedUp` is precomputed by the caller (isShiprocketReversePickedUp or isBorzoReversePickedUp — see lib/shipping/status-mapping.ts), since each provider's status vocabulary differs. */
+export async function applyPartialReturnShippingStatus(returnId: string, rawStatus: string, pickedUp: boolean) {
   return prisma.$transaction(async (tx) => {
     await tx.orderReturn.update({ where: { id: returnId }, data: { shippingStatus: rawStatus } });
 
-    if (!isShiprocketReversePickedUp(rawStatus)) return { transitioned: false };
+    if (!pickedUp) return { transitioned: false };
 
     const transitioned = await tx.orderReturn.updateMany({
       where: { id: returnId, status: "PICKUP_SCHEDULED" },

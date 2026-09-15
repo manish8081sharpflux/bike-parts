@@ -113,15 +113,38 @@ test("a real Borzo courier photo renders as-is; without one, only a neutral icon
 });
 
 // 21/22. map only displays real coordinates; customer page never shows a fake rider
-test("a live rider map renders only when both real coordinates are present, for Borzo only", () => {
-  const withCoords = render(ShipmentTracking, order({
+test("a live map renders (via its Suspense fallback under static rendering) whenever any real coordinate is present, for Borzo only", () => {
+  // Under renderToStaticMarkup there is no browser `window`, so the lazy
+  // DeliveryMap (which imports leaflet) never actually resolves — only its
+  // Suspense fallback ever renders here. That's expected and safe; a real
+  // browser resolves the real Leaflet map instead. This test asserts the
+  // surrounding markup (fallback/container, legend badges, distance, the
+  // "not available yet" message) is correct, not the inner map library.
+  const rider = render(ShipmentTracking, order({
     shippingProvider: "BORZO", shippingOrderId: "borzo-1", deliveryExecutiveLatitude: 18.5204, deliveryExecutiveLongitude: 73.8567,
   }));
-  assert.match(withCoords, /<iframe/); assert.match(withCoords, /18\.5204/); assert.match(withCoords, /73\.8567/);
-  assert.ok(!withCoords.includes("Live courier location is not available yet."));
+  assert.match(rider, /Loading map…/);
+  assert.match(rider, />Rider</);
+  assert.ok(!rider.includes(">Pickup<"));
+  assert.ok(!rider.includes(">Drop<"));
+  assert.ok(!rider.includes("Live courier location is not available yet."));
+
+  const pickupAndDrop = render(ShipmentTracking, order({
+    shippingProvider: "BORZO", shippingOrderId: "borzo-1",
+    shippingPickupLatitude: 18.6055, shippingPickupLongitude: 73.7818,
+    shippingDropLatitude: 18.5738, shippingDropLongitude: 73.7562,
+    shippingDistanceMeters: 7952,
+  }));
+  assert.match(pickupAndDrop, /Loading map…/);
+  assert.match(pickupAndDrop, />Pickup</);
+  assert.match(pickupAndDrop, />Drop</);
+  assert.ok(!pickupAndDrop.includes(">Rider<"));
+  assert.match(pickupAndDrop, /Distance: 8\.0 km/);
+  // Pickup/drop exist but no rider yet — still genuinely true, shown alongside the map.
+  assert.match(pickupAndDrop, /Live courier location is not available yet\./);
 
   const withoutCoords = render(ShipmentTracking, order({ shippingProvider: "BORZO", shippingOrderId: "borzo-1" }));
-  assert.ok(!withoutCoords.includes("<iframe"));
+  assert.ok(!withoutCoords.includes("Loading map…"));
   assert.match(withoutCoords, /Live courier location is not available yet\./);
 
   // A Shiprocket order must never render a map even if (hypothetically) a
@@ -129,7 +152,8 @@ test("a live rider map renders only when both real coordinates are present, for 
   const shiprocket = render(ShipmentTracking, order({
     shippingProvider: "SHIPROCKET", shippingOrderId: "sr-1", deliveryExecutiveLatitude: 18.5204, deliveryExecutiveLongitude: 73.8567,
   }));
-  assert.ok(!shiprocket.includes("<iframe"));
+  assert.ok(!shiprocket.includes("Loading map…"));
+  assert.ok(!shiprocket.includes("Live courier location is not available yet."));
 });
 
 test("only one of latitude/longitude never renders a map or claims a live position", () => {
@@ -161,6 +185,19 @@ test("Borzo shipment details use Borzo-specific labels and never claim an AWB/Sh
   assert.match(html, /Courier\/Rider/);
   assert.ok(!html.includes("AWB Number"));
   assert.ok(!html.includes("Shipment ID"));
+});
+
+// Real Borzo delivery fee — informational only, separate from what the
+// customer already paid at checkout (order.total/deliveryCharge).
+test("a real Borzo delivery fee is shown to the customer; absent when the provider didn't return one", () => {
+  const withFee = render(ShipmentDetails, order({ shippingProvider: "BORZO", shippingOrderId: "BZ-1", shippingDeliveryFeeAmount: 186.42 }));
+  assert.match(withFee, /Delivery Fee/); assert.match(withFee, /₹186\.42|₹186/);
+
+  const withoutFee = render(ShipmentDetails, order({ shippingProvider: "BORZO", shippingOrderId: "BZ-1" }));
+  assert.ok(!withoutFee.includes("Delivery Fee"));
+
+  const shiprocket = render(ShipmentDetails, order({ shippingProvider: "SHIPROCKET", shippingOrderId: "SR-1" }));
+  assert.ok(!shiprocket.includes("Delivery Fee"), "Shiprocket/Porter rows never populate this field");
 });
 
 test("Borzo tracking button reads 'Track Delivery', Shiprocket keeps 'Track Shipment'", () => {

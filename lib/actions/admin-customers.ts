@@ -60,7 +60,7 @@ export async function createCustomerAction(formData: FormData) {
   }
 
   revalidatePath("/admin/customers");
-  redirect("/admin/customers");
+  redirect("/admin/customers?created=1");
 }
 
 export async function deleteCustomerAction(id: string) {
@@ -77,5 +77,5 @@ export async function deleteCustomerAction(id: string) {
   }
 
   revalidatePath("/admin/customers");
-  redirect("/admin/customers");
+  redirect("/admin/customers?notice=customer-deleted");
 }

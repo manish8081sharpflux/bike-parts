@@ -1,15 +1,15 @@
+import { AdminActionForm } from "../../admin-feedback";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronDown } from "lucide-react";
 import { prisma } from "@/lib/db";
-import { formatInr } from "@/lib/format";
+import { formatInr, formatOrderNumber } from "@/lib/format";
 import {
   approveRefundAction,
   approveReturnAction,
   cancelShipmentAction,
   createBorzoDeliveryAction,
-  dispatchOrderAction,
-  dispatchReturnPickupAction,
+  createBorzoReturnPickupAction,
   markReturnReceivedAction,
   refreshDeliveryStatusAction,
   refreshReturnPickupStatusAction,
@@ -17,11 +17,9 @@ import {
   rejectReturnAction,
   updateOrderStatusAction,
 } from "@/lib/actions/admin-orders";
-import { checkLocalDeliveryEligibility } from "@/lib/shipping/service";
 import { RefundReadyPopup } from "./RefundReadyPopup";
 import { ActivityLog } from "./ActivityLog";
 import { PartialReturnsSection } from "./PartialReturnsSection";
-import { ShipmentDispatchForm } from "./ShipmentDispatchForm";
 import { BorzoDeliveryForm } from "./BorzoDeliveryForm";
 
 /** Nicely-cased display label for a raw ShippingProvider enum value. */
@@ -90,23 +88,17 @@ export default async function AdminOrderDetailPage({
   }
 
   const address = (order.deliveryAddress ?? {}) as DeliveryAddress;
-  const boundDispatch = dispatchOrderAction.bind(null, order.id);
   const boundRefresh = refreshDeliveryStatusAction.bind(null, order.id);
   const boundUpdateStatus = updateOrderStatusAction.bind(null, order.id);
   const boundApproveRefund = approveRefundAction.bind(null, order.id);
   const boundRejectRefund = rejectRefundAction.bind(null, order.id);
   const boundApproveReturn = approveReturnAction.bind(null, order.id);
   const boundRejectReturn = rejectReturnAction.bind(null, order.id);
-  const boundDispatchReturnPickup = dispatchReturnPickupAction.bind(null, order.id);
+  const boundCreateBorzoReturnPickup = createBorzoReturnPickupAction.bind(null, order.id);
   const boundRefreshReturnPickup = refreshReturnPickupStatusAction.bind(null, order.id);
   const boundMarkReturnReceived = markReturnReceivedAction.bind(null, order.id);
   const boundCancelShipment = cancelShipmentAction.bind(null, order.id);
   const boundCreateBorzoDelivery = createBorzoDeliveryAction.bind(null, order.id);
-  // Borzo is a same-city courier — only offered when both the warehouse and
-  // this order's delivery address are Pune (see lib/shipping/pune-eligibility.ts).
-  // Re-checked server-side again inside createBorzoDeliveryAction/the quote
-  // route — this is only what decides whether the card renders at all.
-  const canOfferBorzo = checkLocalDeliveryEligibility(process.env.WAREHOUSE_CITY, address.city, address.pincode).eligible;
 
   return (
     <div className="flex flex-col gap-4">
@@ -120,7 +112,7 @@ export default async function AdminOrderDetailPage({
           <Link href="/admin/orders" className="text-xs font-bold text-zinc-500">
             ← Back to orders
           </Link>
-          <h1 className="mt-1 text-2xl font-black">Order #{order.id.slice(-8)}</h1>
+          <h1 className="mt-1 text-2xl font-black">Order {formatOrderNumber(order.createdAt)}</h1>
           <p className="text-sm text-zinc-500">
             Placed {order.createdAt.toLocaleString("en-IN")}
           </p>
@@ -253,7 +245,7 @@ export default async function AdminOrderDetailPage({
 
               {order.returnStatus === "REQUESTED" ? (
                 <div className="mt-3 flex flex-col gap-2">
-                  <form action={boundApproveReturn} className="flex flex-col gap-2">
+                  <AdminActionForm action={boundApproveReturn} className="flex flex-col gap-2">
                     <textarea
                       name="returnAdminNote"
                       placeholder="Note for this return (optional)"
@@ -265,8 +257,8 @@ export default async function AdminOrderDetailPage({
                     >
                       Approve return
                     </button>
-                  </form>
-                  <form action={boundRejectReturn} className="flex flex-col gap-2">
+                  </AdminActionForm>
+                  <AdminActionForm action={boundRejectReturn} className="flex flex-col gap-2">
                     <textarea
                       name="returnAdminNote"
                       required
@@ -279,7 +271,7 @@ export default async function AdminOrderDetailPage({
                     >
                       Reject return
                     </button>
-                  </form>
+                  </AdminActionForm>
                 </div>
               ) : order.returnStatus === "APPROVED" ? (
                 order.returnShippingReconciliationRequired ? (
@@ -292,11 +284,14 @@ export default async function AdminOrderDetailPage({
                   </div>
                 ) : (
                   <div className="mt-3">
-                    <ShipmentDispatchForm
-                      action={boundDispatchReturnPickup}
-                      serviceabilityUrl={`/api/admin/orders/${order.id}/return-serviceability`}
+                    <p className="mb-2 text-xs text-zinc-500">
+                      Creates a Borzo pickup — the customer&apos;s address becomes the pickup point, the warehouse the drop.
+                    </p>
+                    <BorzoDeliveryForm
+                      action={boundCreateBorzoReturnPickup}
+                      quoteUrl={`/api/admin/orders/${order.id}/borzo-return-quote`}
+                      cardTitle="Borzo Return Pickup"
                       submitLabel="Create Return Pickup"
-                      description="Creates a reverse shipment — the customer's address becomes the pickup point, the warehouse the drop."
                     />
                   </div>
                 )
@@ -304,7 +299,8 @@ export default async function AdminOrderDetailPage({
                 <div className="mt-3 flex flex-col gap-2">
                   {order.returnShippingOrderId && order.returnShippingOrderId !== "CREATING" ? (
                     <p className="text-xs text-zinc-500">
-                      Provider: <span className="font-bold">{order.returnShippingProvider ?? "Shiprocket"}</span> &bull; Courier:{" "}
+                      Provider: <span className="font-bold">{providerLabel(order.returnShippingProvider)}</span> &bull;{" "}
+                      {order.returnShippingProvider === "BORZO" ? "Courier/Rider" : "Courier"}:{" "}
                       <span className="font-bold">{order.returnShippingCourierName ?? "unknown"}</span>
                       {order.returnShippingAwbCode ? (
                         <>
@@ -321,18 +317,18 @@ export default async function AdminOrderDetailPage({
                       rel="noreferrer"
                       className="text-xs font-bold text-[#ff4b1f]"
                     >
-                      Track Shipment ↗
+                      {order.returnShippingProvider === "BORZO" ? "Track Delivery" : "Track Shipment"} ↗
                     </a>
                   ) : null}
-                  <form action={boundRefreshReturnPickup}>
+                  <AdminActionForm action={boundRefreshReturnPickup}>
                     <button
                       type="submit"
                       className="h-9 w-full rounded-lg border border-zinc-200 text-xs font-bold text-zinc-700 hover:bg-zinc-50"
                     >
                       Refresh Tracking
                     </button>
-                  </form>
-                  <form action={boundMarkReturnReceived} className="flex flex-col gap-2">
+                  </AdminActionForm>
+                  <AdminActionForm action={boundMarkReturnReceived} className="flex flex-col gap-2">
                     <label className="text-xs font-bold text-zinc-700">
                       Return condition
                       <div className="relative mt-1">
@@ -365,7 +361,7 @@ export default async function AdminOrderDetailPage({
                     >
                       Mark received at warehouse
                     </button>
-                  </form>
+                  </AdminActionForm>
                 </div>
               ) : order.returnStatus === "REJECTED" ? (
                 <p className="mt-2 text-xs text-zinc-500">
@@ -468,7 +464,7 @@ export default async function AdminOrderDetailPage({
 
               {order.refundStatus === "REQUESTED" ? (
                 <div className="mt-3 flex flex-col gap-2">
-                  <form action={boundApproveRefund} className="flex flex-col gap-2">
+                  <AdminActionForm action={boundApproveRefund} className="flex flex-col gap-2">
                     <textarea
                       name="refundAdminNote"
                       placeholder="Note for this refund (optional)"
@@ -480,8 +476,8 @@ export default async function AdminOrderDetailPage({
                     >
                       Approve &amp; refund via Razorpay
                     </button>
-                  </form>
-                  <form action={boundRejectRefund} className="flex flex-col gap-2">
+                  </AdminActionForm>
+                  <AdminActionForm action={boundRejectRefund} className="flex flex-col gap-2">
                     <textarea
                       name="refundAdminNote"
                       required
@@ -494,7 +490,7 @@ export default async function AdminOrderDetailPage({
                     >
                       Reject refund
                     </button>
-                  </form>
+                  </AdminActionForm>
                 </div>
               ) : order.refundStatus === "PROCESSING" ? (
                 <p className="mt-3 rounded-lg bg-blue-50 px-3 py-2 text-xs font-medium text-blue-700">
@@ -531,7 +527,7 @@ export default async function AdminOrderDetailPage({
 
           <div className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-zinc-100">
             <h2 className="text-base font-black">Update status</h2>
-            <form action={boundUpdateStatus} className="mt-3 flex flex-col gap-2">
+            <AdminActionForm action={boundUpdateStatus} className="mt-3 flex flex-col gap-2">
               <div className="relative">
                 {/* key={order.status} forces a remount whenever the saved status
                     changes, so defaultValue re-applies — a plain re-render alone
@@ -564,7 +560,7 @@ export default async function AdminOrderDetailPage({
               >
                 Save status
               </button>
-            </form>
+            </AdminActionForm>
           </div>
 
           <div className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-zinc-100">
@@ -620,47 +616,51 @@ export default async function AdminOrderDetailPage({
                   </a>
                 ) : null}
 
-                <form action={boundRefresh} className="mt-2">
+                <AdminActionForm action={boundRefresh} className="mt-2">
                   <button
                     type="submit"
                     className="h-9 w-full rounded-lg border border-zinc-200 text-xs font-bold text-zinc-700 hover:bg-zinc-50"
                   >
                     Refresh Tracking
                   </button>
-                </form>
+                </AdminActionForm>
                 {order.status !== "DELIVERED" && order.status !== "CANCELLED" ? (
-                  <form action={boundCancelShipment}>
+                  <AdminActionForm action={boundCancelShipment}>
                     <button
                       type="submit"
                       className="h-9 w-full rounded-lg border border-red-200 text-xs font-bold text-red-700 hover:bg-red-50"
                     >
                       {order.shippingProvider === "BORZO" ? "Cancel Delivery" : "Cancel Shipment"}
                     </button>
-                  </form>
+                  </AdminActionForm>
                 ) : null}
               </div>
             ) : (
-              <div className="mt-3">
-                <ShipmentDispatchForm
-                  action={boundDispatch}
-                  serviceabilityUrl={`/api/admin/orders/${order.id}/dispatch-serviceability`}
-                  submitLabel="Create Shipment"
-                  description="Creates a shipment with the shipping provider. The order must be paid first."
-                />
-              </div>
+              // Borzo is the store's only active delivery provider — new
+              // shipments are never created through Shiprocket (see the
+              // "Borzo Local Delivery" card below). This branch only shows
+              // once payment/eligibility isn't ready yet for that card;
+              // once paid, the card below takes over.
+              <p className="mt-2 text-xs text-zinc-500">
+                {order.paymentStatus === "PAID"
+                  ? "Waiting for a Borzo delivery to be created below."
+                  : "Delivery can be created once this order is paid."}
+              </p>
             )}
           </div>
 
           {/*
-            Borzo Local Delivery card — a same-city courier option shown
-            only for Pune-to-Pune orders (Part 7/9), and only before any
-            shipment (Shiprocket or Borzo) has been created — once
-            order.shippingOrderId is set, the "Shipping" card above takes
-            over regardless of which provider won. Never shows Shiprocket's
-            AWB/label workflow (Part 10) since Borzo's own create action
-            never touches those fields.
+            Borzo Local Delivery card — the store's only active forward-
+            delivery provider. Shown whenever the order is paid and no
+            shipment has been created yet, regardless of the pre-check
+            eligibility signal below — the quote endpoint underneath (see
+            BorzoDeliveryForm) always re-checks the real address server-side
+            and reports clearly if a specific order genuinely isn't Pune,
+            rather than silently hiding the only delivery option with no
+            explanation. Never shows Shiprocket's AWB/label workflow (Part
+            10) since Borzo's own create action never touches those fields.
           */}
-          {canOfferBorzo && order.paymentStatus === "PAID" && (!order.shippingOrderId || order.shippingOrderId === "CREATING") ? (
+          {order.paymentStatus === "PAID" && (!order.shippingOrderId || order.shippingOrderId === "CREATING") ? (
             <div className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-zinc-100">
               <h2 className="text-base font-black">Borzo Local Delivery</h2>
               <p className="mt-1 text-xs text-zinc-500">Same-city courier for Pune-to-Pune orders.</p>

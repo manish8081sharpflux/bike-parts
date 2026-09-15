@@ -96,6 +96,8 @@ type BorzoPoint = {
   tracking_url?: string | null;
   delivery?: { status?: string };
   is_return_point?: boolean;
+  /** Real driving distance (meters) from the previous point — confirmed from a live test-account response; 0 on the first point. */
+  previous_point_driving_distance_meters?: number;
 };
 
 type BorzoOrder = {
@@ -275,6 +277,15 @@ export type BorzoOrderResult = {
   trackingUrl: string | null;
   /** A real document URL only — see Part 20; optionally surfaced in Admin, never required for the local-delivery workflow. */
   waybillUrl: string | null;
+  /** The real, committed delivery fee for this booking — null when Borzo genuinely didn't return one, never fabricated. Distinct from the pre-booking estimate in calculateDelivery/BorzoQuoteResult. */
+  deliveryFeeAmount: number | null;
+  /** Real, Borzo-geocoded pickup/drop coordinates — confirmed from a live test-account response (points[].latitude/longitude). Never derived from a pincode or city center. Both null unless both are present. */
+  pickupLatitude: number | null;
+  pickupLongitude: number | null;
+  dropLatitude: number | null;
+  dropLongitude: number | null;
+  /** Borzo's own real driving-distance estimate (meters) from pickup to drop — points[1].previous_point_driving_distance_meters, confirmed from a live test-account response. Null when not returned. */
+  distanceMeters: number | null;
   raw: unknown;
 };
 
@@ -292,9 +303,27 @@ function findDropPoint(points?: BorzoPoint[]): BorzoPoint | undefined {
   return candidates[candidates.length - 1];
 }
 
+/** The complement of findDropPoint — whichever forward point isn't the drop. For the normal 2-point order this is the pickup (points[0]), found the same non-positional way. */
+function findPickupPoint(points: BorzoPoint[] | undefined, dropPoint: BorzoPoint | undefined): BorzoPoint | undefined {
+  if (!points || points.length === 0) return undefined;
+  const forwardPoints = points.filter((p) => p.is_return_point !== true);
+  const candidates = forwardPoints.length > 0 ? forwardPoints : points;
+  return candidates.find((p) => p !== dropPoint) ?? candidates[0];
+}
+
+/** A latitude/longitude pair only when BOTH are real, finite numbers — a stray single coordinate is never a real position. */
+function realLatLng(lat: unknown, lng: unknown): { lat: number; lng: number } | null {
+  const latitude = realNumber(lat);
+  const longitude = realNumber(lng);
+  return latitude != null && longitude != null ? { lat: latitude, lng: longitude } : null;
+}
+
 function normalizeOrder(order: BorzoOrder, response: unknown, fallbackId?: string): BorzoOrderResult {
   const orderId = order.order_id != null ? String(order.order_id) : fallbackId ?? "";
   const dropPoint = findDropPoint(order.points);
+  const pickupPoint = findPickupPoint(order.points, dropPoint);
+  const pickupLatLng = realLatLng(pickupPoint?.latitude, pickupPoint?.longitude);
+  const dropLatLng = realLatLng(dropPoint?.latitude, dropPoint?.longitude);
   return {
     borzoOrderId: orderId,
     status: String(order.status ?? "unknown"),
@@ -302,6 +331,12 @@ function normalizeOrder(order: BorzoOrder, response: unknown, fallbackId?: strin
     pointDeliveryStatus: dropPoint?.delivery?.status ?? null,
     trackingUrl: dropPoint?.tracking_url ?? null,
     waybillUrl: order.waybill_document_url ?? null,
+    deliveryFeeAmount: realNumber(order.delivery_fee_amount),
+    pickupLatitude: pickupLatLng?.lat ?? null,
+    pickupLongitude: pickupLatLng?.lng ?? null,
+    dropLatitude: dropLatLng?.lat ?? null,
+    dropLongitude: dropLatLng?.lng ?? null,
+    distanceMeters: realNumber(dropPoint?.previous_point_driving_distance_meters),
     raw: response,
   };
 }

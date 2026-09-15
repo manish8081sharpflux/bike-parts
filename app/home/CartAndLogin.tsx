@@ -3,15 +3,18 @@
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import Image from "next/image";
-import { ArrowRight, Minus, Plus, Settings, ShoppingCart, X } from "lucide-react";
+import { ArrowRight, Loader2, Minus, Plus, Settings, ShoppingCart, X } from "lucide-react";
 import type { CartLine } from "./types";
 import { parsePrice, formatPrice } from "./utils";
 import { calculateCheckoutTotals } from "@/lib/checkout-amount";
+
+type DeliveryQuoteState = { amount: number; isRealQuote: boolean } | null;
 
 export function CartDrawer({
   isOpen,
   items,
   isAuthenticated,
+  addressId,
   notice,
   onDismissNotice,
   onClose,
@@ -24,6 +27,8 @@ export function CartDrawer({
   isOpen: boolean;
   items: CartLine[];
   isAuthenticated: boolean;
+  /** The customer's currently selected (usually default) saved address — used to fetch a real, live delivery-fee estimate right in the cart. Null when not logged in yet or no address is saved. */
+  addressId: string | null;
   notice?: string | null;
   onDismissNotice?: () => void;
   onClose: () => void;
@@ -33,6 +38,66 @@ export function CartDrawer({
   onProceedToLogin: () => void;
   onCheckout: () => void;
 }) {
+  const [deliveryQuote, setDeliveryQuote] = useState<DeliveryQuoteState>(null);
+  const [isQuoting, setIsQuoting] = useState(false);
+  const itemsKey = items.map((line) => `${line.product.id}:${line.quantity}`).join(",");
+  const canQuote = isOpen && isAuthenticated && Boolean(addressId) && items.length > 0;
+  const quoteKey = `${canQuote}|${addressId ?? ""}|${itemsKey}`;
+
+  // Reset (not fetch) whenever what we'd quote against actually changes —
+  // done here, during render, rather than inside the effect below, since
+  // setState directly in an effect body risks a cascading extra render;
+  // adjusting state in response to a prop/derived-value change during
+  // render is the pattern React itself recommends for this, and the one
+  // RefundReadyPopup.tsx already uses elsewhere in this app.
+  const [lastQuoteKey, setLastQuoteKey] = useState(quoteKey);
+  if (quoteKey !== lastQuoteKey) {
+    setLastQuoteKey(quoteKey);
+    setDeliveryQuote(null);
+    setIsQuoting(canQuote);
+  }
+
+  // A real, live delivery-fee estimate shown immediately in the cart — not
+  // deferred to checkout — using the customer's already-selected address
+  // (the same one /api/checkout/delivery-quote and the real checkout charge
+  // both read). Debounced (500ms) so rapid +/- clicks don't spam Borzo;
+  // re-fetches whenever `quoteKey` actually changes. Every setState call
+  // here happens inside an async callback (the timer or the fetch chain),
+  // never synchronously in the effect body itself. Never fires while
+  // closed, logged out, or with no address on file — there's nothing real
+  // to quote against yet in those cases, and the UI falls back to
+  // "Calculated at checkout" instead.
+  useEffect(() => {
+    if (!canQuote || !addressId) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      fetch("/api/checkout/delivery-quote", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          addressId,
+          items: items.map((line) => ({ id: line.product.id, quantity: line.quantity })),
+        }),
+      })
+        .then((response) => (response.ok ? response.json() : null))
+        .then((data) => {
+          if (cancelled || !data) return;
+          setDeliveryQuote({ amount: Number(data.deliveryCharge) || 0, isRealQuote: Boolean(data.isRealQuote) });
+        })
+        .catch(() => {
+          if (!cancelled) setDeliveryQuote(null);
+        })
+        .finally(() => {
+          if (!cancelled) setIsQuoting(false);
+        });
+    }, 500);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- quoteKey is the intentional, debounce-friendly stand-in for {canQuote, addressId, items}; items/addressId are read fresh from the enclosing render's closure once the key actually changes, so there's no staleness.
+  }, [quoteKey]);
+
   if (!isOpen) {
     return null;
   }
@@ -42,13 +107,15 @@ export function CartDrawer({
     (sum, item) => sum + parsePrice(item.product.price) * item.quantity,
     0
   );
-  const { taxAmount: gst, amount: total } = calculateCheckoutTotals(
+  const { taxAmount: gst, amount: totalExclDelivery } = calculateCheckoutTotals(
     items.map(({ product, quantity }) => ({
       price: parsePrice(product.price),
       gstRate: product.gstRate,
       quantity,
     }))
   );
+  const hasRealDeliveryQuote = deliveryQuote?.isRealQuote ?? false;
+  const total = totalExclDelivery + (hasRealDeliveryQuote ? deliveryQuote!.amount : 0);
 
   return (
     <div className="fixed inset-0 z-50">
@@ -182,7 +249,17 @@ export function CartDrawer({
                 </div>
                 <div className="flex items-center justify-between text-zinc-600">
                   <span>Delivery Charge</span>
-                  <span className="font-bold text-emerald-600">Free</span>
+                  {isQuoting ? (
+                    <span className="flex items-center gap-1.5 text-xs font-medium text-zinc-400">
+                      <Loader2 className="size-3 animate-spin" aria-hidden="true" /> Calculating…
+                    </span>
+                  ) : hasRealDeliveryQuote ? (
+                    <span className={`font-bold ${deliveryQuote!.amount === 0 ? "text-emerald-600" : "text-[#070e2b]"}`}>
+                      {deliveryQuote!.amount === 0 ? "Free" : `₹${formatPrice(deliveryQuote!.amount)}`}
+                    </span>
+                  ) : (
+                    <span className="font-bold text-zinc-500">Calculated at checkout</span>
+                  )}
                 </div>
                 <div className="flex items-center justify-between text-zinc-600">
                   <span>GST</span>
@@ -193,11 +270,18 @@ export function CartDrawer({
               </div>
 
               <div className="mt-3 flex items-center justify-between border-t border-dashed border-zinc-200 pt-3">
-                <span className="text-base font-black text-[#070e2b]">Total</span>
+                <span className="text-base font-black text-[#070e2b]">
+                  {hasRealDeliveryQuote ? "Total" : "Total (excl. delivery)"}
+                </span>
                 <span className="text-lg font-black text-[#070e2b]">
                   &#8377;{formatPrice(total)}
                 </span>
               </div>
+              {!hasRealDeliveryQuote ? (
+                <p className="mt-1 text-[11px] text-zinc-400">
+                  {isQuoting ? "Calculating your real delivery fee…" : "The real delivery fee is added once you choose your delivery address."}
+                </p>
+              ) : null}
 
               <button
                 type="button"

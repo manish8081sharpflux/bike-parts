@@ -1,4 +1,6 @@
 "use client";
+import { AdminActionForm } from "../../admin-feedback";
+
 
 import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
@@ -14,12 +16,24 @@ type QuoteResponse =
  * it before letting the admin book (Part 8/9 of the Borzo integration
  * task). Only ever shows a fee/ETA the quote endpoint actually returned —
  * never a fabricated price or delivery time. `action` (bound to
- * createBorzoDeliveryAction) is a plain no-argument server action — Borzo's
- * booking has no courier choice or dimension confirmation step the way the
- * Shiprocket dispatch form does (see ShipmentDispatchForm.tsx), since
- * Borzo's request shape doesn't take either.
+ * createBorzoDeliveryAction, or createBorzoReturnPickupAction/
+ * createBorzoPartialReturnPickupAction for a return pickup — the same
+ * create-order call either way, just with pickup/drop swapped) is a plain
+ * no-argument server action — Borzo's booking has no courier choice or
+ * dimension confirmation step the way the old Shiprocket dispatch form
+ * did, since Borzo's request shape doesn't take either.
  */
-export function BorzoDeliveryForm({ action, quoteUrl }: { action: () => void; quoteUrl: string }) {
+export function BorzoDeliveryForm({
+  action,
+  quoteUrl,
+  cardTitle = "Borzo Delivery",
+  submitLabel = "Create Borzo Delivery",
+}: {
+  action: () => void;
+  quoteUrl: string;
+  cardTitle?: string;
+  submitLabel?: string;
+}) {
   const [quote, setQuote] = useState<QuoteResponse | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -58,9 +72,9 @@ export function BorzoDeliveryForm({ action, quoteUrl }: { action: () => void; qu
   }
 
   return (
-    <form action={action} className="flex flex-col gap-2">
+    <AdminActionForm action={action} className="flex flex-col gap-2">
       <div className="rounded-lg border border-zinc-200 p-3 text-xs">
-        <p className="text-[10px] font-black uppercase tracking-wide text-zinc-400">Borzo Delivery</p>
+        <p className="text-[10px] font-black uppercase tracking-wide text-zinc-400">{cardTitle}</p>
         <p className="mt-1">
           Estimated Delivery Fee:{" "}
           <span className="font-bold text-zinc-800">{quote.deliveryFeeAmount != null ? `₹${quote.deliveryFeeAmount}` : "not returned by Borzo"}</span>
@@ -74,8 +88,8 @@ export function BorzoDeliveryForm({ action, quoteUrl }: { action: () => void; qu
         type="submit"
         className="flex h-10 w-full items-center justify-center gap-1.5 rounded-lg bg-[#ff4b1f] text-sm font-bold text-white transition hover:bg-[#e8330e]"
       >
-        Create Borzo Delivery
+        {submitLabel}
       </button>
-    </form>
+    </AdminActionForm>
   );
 }

@@ -1,3 +1,4 @@
+import { AdminActionForm } from "../../admin-feedback";
 import Link from "next/link";
 import { createCustomerAction } from "@/lib/actions/admin-customers";
 
@@ -27,7 +28,7 @@ export default async function NewCustomerPage({
       ) : null}
 
       <div className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-zinc-100">
-        <form action={createCustomerAction} className="flex max-w-xl flex-col gap-3">
+        <AdminActionForm action={createCustomerAction} className="flex max-w-xl flex-col gap-3">
           <label className="flex flex-col gap-1 text-sm font-bold text-zinc-700">
             Name
             <input
@@ -67,7 +68,7 @@ export default async function NewCustomerPage({
           >
             Add customer
           </button>
-        </form>
+        </AdminActionForm>
       </div>
     </div>
   );

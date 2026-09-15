@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
-import { formatInr } from "@/lib/format";
+import { formatInr, formatOrderNumber } from "@/lib/format";
 import type { OrderStatus, PaymentStatus, RefundStatus, ReturnStatus } from "@prisma/client";
 import { AdminPagination, parsePage } from "../admin-pagination";
 import { AutoSubmitFilterForm } from "../auto-submit-filter-form";
@@ -145,13 +145,22 @@ export default async function AdminOrderList({
           name="q"
           defaultValue={query}
           placeholder="Search order id, name, or phone…"
-          className="h-10 w-64 shrink-0 rounded-lg border border-zinc-300 px-3 text-sm outline-none focus:border-zinc-500"
+          className="h-10 w-48 min-w-0 shrink grow rounded-lg border border-zinc-300 px-3 text-sm outline-none focus:border-zinc-500 sm:w-56"
         />
 
+        {/*
+          Each select gets an explicit, capped width — without one, a native
+          <select> sizes itself to fit its longest *option* (e.g. "Return:
+          PICKUP SCHEDULED"), not just the short "All ..." placeholder it
+          usually shows, which was forcing this row wider than the page and
+          into a horizontal scrollbar. `truncate` clips a long selected
+          value with an ellipsis instead of overflowing the fixed box; the
+          open dropdown panel itself still shows every option in full.
+        */}
         <select
           name="status"
           defaultValue={statusFilter?.value ?? ""}
-          className="h-10 rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-700 outline-none focus:border-zinc-500"
+          className="h-10 w-36 shrink-0 truncate rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-700 outline-none focus:border-zinc-500"
         >
           <option value="">All statuses</option>
           {STATUS_FILTERS.map((filter) => (
@@ -164,7 +173,7 @@ export default async function AdminOrderList({
         <select
           name="payment"
           defaultValue={paymentFilter ?? ""}
-          className="h-10 rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-700 outline-none focus:border-zinc-500"
+          className="h-10 w-36 shrink-0 truncate rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-700 outline-none focus:border-zinc-500"
         >
           <option value="">All payments</option>
           {PAYMENT_STATUS_VALUES.map((value) => (
@@ -177,7 +186,7 @@ export default async function AdminOrderList({
         <select
           name="refund"
           defaultValue={refundFilter ?? ""}
-          className="h-10 rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-700 outline-none focus:border-zinc-500"
+          className="h-10 w-36 shrink-0 truncate rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-700 outline-none focus:border-zinc-500"
         >
           <option value="">All refunds</option>
           {REFUND_STATUS_VALUES.map((value) => (
@@ -190,7 +199,7 @@ export default async function AdminOrderList({
         <select
           name="return"
           defaultValue={returnFilter ?? ""}
-          className="h-10 rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-700 outline-none focus:border-zinc-500"
+          className="h-10 w-40 shrink-0 truncate rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-700 outline-none focus:border-zinc-500"
         >
           <option value="">All returns</option>
           {RETURN_STATUS_VALUES.map((value) => (
@@ -227,7 +236,7 @@ export default async function AdminOrderList({
             {orders.map((order) => (
               <tr key={order.id} className="border-b border-zinc-50 last:border-0">
                 <td className="px-4 py-3 font-mono text-xs text-zinc-500">
-                  #{order.id.slice(-8)}
+                  {formatOrderNumber(order.createdAt)}
                   <div className="text-[10px] text-zinc-400">
                     {order.createdAt.toLocaleString("en-IN")}
                   </div>
@@ -279,7 +288,7 @@ export default async function AdminOrderList({
                 <td className="px-4 py-3">
                   <Link
                     href={`/admin/orders/${order.id}`}
-                    className="text-xs font-bold text-[#ff4b1f]"
+                    className="inline-flex h-8 items-center justify-center rounded-lg border border-zinc-200 px-3 text-xs font-bold text-zinc-700 transition hover:border-orange-200 hover:bg-orange-50 hover:text-orange-700"
                   >
                     View
                   </Link>

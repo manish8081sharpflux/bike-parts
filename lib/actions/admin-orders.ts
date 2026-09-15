@@ -21,7 +21,7 @@ import {
   ShippingProviderError,
 } from "@/lib/shipping/service";
 import { buildPackage, calculateTotalWeightKg } from "@/lib/shipping/package";
-import { mapBorzoStatusToOrderStatus } from "@/lib/shipping/status-mapping";
+import { isShiprocketReversePickedUp, isBorzoReversePickedUp } from "@/lib/shipping/status-mapping";
 import { createRazorpayRefund, isRazorpayConfigured } from "@/lib/razorpay";
 import {
   claimRefundRequest,
@@ -34,6 +34,7 @@ import {
   applyShippingStatus,
   cancelAdminOrderBeforeDispatch,
   claimShippingDispatch,
+  refreshBorzoOrderTracking,
   ORDER_STATUS_LABELS,
 } from "@/lib/order-delivery-state";
 import {
@@ -354,27 +355,9 @@ export async function refreshDeliveryStatusAction(orderId: string) {
       // GET /orders (order/status/tracking) + GET /courier (real rider, if
       // assigned) — see lib/shipping/service.ts's trackLocalDelivery, which
       // never fails the whole refresh just because no courier exists yet.
-      const tracking = await trackLocalDelivery(order.shippingOrderId);
-      const hasLiveLocation = tracking.courierLatitude != null && tracking.courierLongitude != null;
-      const mapped = mapBorzoStatusToOrderStatus(tracking.status, {
-        pointStatuses: tracking.pointDeliveryStatus ? [tracking.pointDeliveryStatus] : [],
-        courierHasLiveLocation: hasLiveLocation,
-      });
-      await applyProviderTrackingUpdate(orderId, mapped, tracking.status, "Borzo", {
-        shippingStatus: tracking.status,
-        shippingTrackingUrl: tracking.trackingUrl ?? order.shippingTrackingUrl,
-        shippingWaybillUrl: tracking.waybillUrl ?? order.shippingWaybillUrl,
-        shippingCourierName: tracking.courierName ?? order.shippingCourierName,
-        deliveryExecutiveName: tracking.courierName ?? order.deliveryExecutiveName,
-        deliveryExecutivePhone: tracking.courierPhone ?? order.deliveryExecutivePhone,
-        deliveryExecutiveId: tracking.courierId ?? order.deliveryExecutiveId,
-        deliveryExecutivePhotoUrl: tracking.courierPhotoUrl ?? order.deliveryExecutivePhotoUrl,
-        // Only ever both-or-neither — a stale single coordinate left over
-        // from a courier who's since gone off-shift is not a real position.
-        deliveryExecutiveLatitude: hasLiveLocation ? tracking.courierLatitude : null,
-        deliveryExecutiveLongitude: hasLiveLocation ? tracking.courierLongitude : null,
-        shippingLastUpdatedAt: new Date(),
-      });
+      // Shared with the customer-facing polling route — see
+      // lib/order-delivery-state.ts's refreshBorzoOrderTracking.
+      await refreshBorzoOrderTracking(order);
     } else {
       const tracking = await trackShipment({ awbCode: order.shippingAwbCode, shippingShipmentId: order.shippingShipmentId });
       await applyShippingStatus(orderId, tracking.rawStatus);
@@ -547,6 +530,12 @@ export async function createBorzoDeliveryAction(orderId: string) {
           shippingStatus: created.status,
           shippingTrackingUrl: created.trackingUrl,
           shippingWaybillUrl: created.waybillUrl,
+          shippingDeliveryFeeAmount: created.deliveryFeeAmount,
+          shippingPickupLatitude: created.pickupLatitude,
+          shippingPickupLongitude: created.pickupLongitude,
+          shippingDropLatitude: created.dropLatitude,
+          shippingDropLongitude: created.dropLongitude,
+          shippingDistanceMeters: created.distanceMeters != null ? Math.round(created.distanceMeters) : null,
           shippingLastUpdatedAt: new Date(),
           status: "SHIPPED",
           shippingReconciliationRequired: false,
@@ -798,6 +787,98 @@ export async function dispatchReturnPickupAction(orderId: string, formData: Form
   revalidatePath("/admin/returns");
 }
 
+/**
+ * Creates a real Borzo return pickup for an approved legacy whole-order
+ * return — the exact same create-order call as a forward delivery, just
+ * with pickup and drop swapped (customer's address is the pickup point,
+ * the warehouse the drop). Borzo has no separate "return" concept; a
+ * delivery order doesn't care which direction it's going. Re-checks Pune
+ * eligibility server-side, same as createBorzoDeliveryAction, and shares
+ * the same claim-before-mutate protection via claimReturnShippingDispatch.
+ */
+export async function createBorzoReturnPickupAction(orderId: string) {
+  await requireAdminAction();
+  let claimed = false;
+  let shipmentCreated = false;
+
+  try {
+    const order = await prisma.order.findUniqueOrThrow({
+      where: { id: orderId },
+      include: { items: { include: { listing: true } } },
+    });
+
+    if (order.returnStatus !== "APPROVED") {
+      throw new Error("This return has not been approved yet.");
+    }
+    if (order.returnShippingReconciliationRequired) {
+      throw new Error("Shipment outcome is uncertain. Verify with the provider before creating another.");
+    }
+    if (order.returnShippingOrderId) {
+      throw new Error("A shipment has already been created for this return.");
+    }
+
+    const address = (order.deliveryAddress ?? {}) as DeliveryAddress;
+    const eligibility = checkLocalDeliveryEligibility(process.env.WAREHOUSE_CITY, address.city, address.pincode);
+    if (!eligibility.eligible) {
+      throw new Error(eligibility.reason);
+    }
+
+    assertBorzoConfigured();
+    assertWarehouseConfiguredInProduction();
+
+    const pickup = customerAddressFrom(order);
+    const totalWeightKg = calculateTotalWeightKg(
+      order.items.map((item) => ({
+        productName: item.productName,
+        quantity: item.quantity,
+        weightKg: item.listing?.weightKg != null ? Number(item.listing.weightKg) : null,
+      }))
+    );
+
+    if (!(await claimReturnShippingDispatch(orderId))) {
+      throw new Error("A shipment has already been created for this return.");
+    }
+    claimed = true;
+
+    const created = await createLocalDelivery({
+      pickup,
+      drop: warehouseAddress(),
+      matter: buildMatterDescription(order.items),
+      totalWeightKg,
+    });
+    shipmentCreated = true;
+
+    if (
+      !(await completeReturnShippingDispatch(orderId, {
+        provider: "BORZO",
+        shippingOrderId: created.shippingOrderId,
+        shippingShipmentId: null,
+        awbCode: null,
+        courierName: created.courierName,
+        status: created.status,
+        trackingUrl: created.trackingUrl,
+      }))
+    ) {
+      throw new Error("Return shipment claim is no longer current.");
+    }
+  } catch (error) {
+    console.error("[shipping] Borzo return pickup creation failed for order", orderId, error);
+    if (claimed) {
+      const failureMessage = error instanceof Error ? error.message : "Could not create this return pickup.";
+      const uncertain = shipmentCreated || isUncertain(error);
+      await failReturnShippingDispatch(orderId, failureMessage, uncertain).catch((dbError) => {
+        console.error("[shipping] Also failed to record return-dispatch-failed state for order", orderId, dbError);
+      });
+    }
+    const message = error instanceof Error ? error.message : "Could not create this return pickup.";
+    redirect(`/admin/orders/${orderId}?error=${encodeURIComponent(message)}`);
+  }
+
+  revalidatePath(`/admin/orders/${orderId}`);
+  revalidatePath("/admin/orders");
+  revalidatePath("/admin/returns");
+}
+
 /** Refreshes the reverse-shipment tracking status for the legacy whole-order return, moving PICKUP_SCHEDULED to PICKED_UP once collected. */
 export async function refreshReturnPickupStatusAction(orderId: string) {
   await requireAdminAction();
@@ -811,10 +892,23 @@ export async function refreshReturnPickupStatusAction(orderId: string) {
       throw new Error("This return does not have an active shipment yet.");
     }
 
-    const tracking = await trackShipment({ awbCode: order.returnShippingAwbCode, shippingShipmentId: order.returnShippingShipmentId });
-    await applyReturnShippingStatus(orderId, tracking.rawStatus);
-    if (tracking.trackingUrl) {
-      await prisma.order.update({ where: { id: orderId }, data: { returnShippingTrackingUrl: tracking.trackingUrl } });
+    if (order.returnShippingProvider === "BORZO") {
+      const tracking = await trackLocalDelivery(order.returnShippingOrderId);
+      const pickedUp = isBorzoReversePickedUp(tracking.status, tracking.pointDeliveryStatus ? [tracking.pointDeliveryStatus] : []);
+      await applyReturnShippingStatus(orderId, tracking.status, pickedUp);
+      await prisma.order.update({
+        where: { id: orderId },
+        data: {
+          returnShippingTrackingUrl: tracking.trackingUrl ?? order.returnShippingTrackingUrl,
+          returnShippingCourierName: tracking.courierName ?? order.returnShippingCourierName,
+        },
+      });
+    } else {
+      const tracking = await trackShipment({ awbCode: order.returnShippingAwbCode, shippingShipmentId: order.returnShippingShipmentId });
+      await applyReturnShippingStatus(orderId, tracking.rawStatus, isShiprocketReversePickedUp(tracking.rawStatus));
+      if (tracking.trackingUrl) {
+        await prisma.order.update({ where: { id: orderId }, data: { returnShippingTrackingUrl: tracking.trackingUrl } });
+      }
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not refresh shipment status.";
@@ -997,6 +1091,96 @@ export async function dispatchPartialReturnPickupAction(orderId: string, returnI
   revalidatePath("/admin/returns");
 }
 
+/**
+ * Creates a real Borzo return pickup for one approved partial return — same
+ * pickup/drop swap as createBorzoReturnPickupAction, but built from only
+ * this return's OrderReturnItem contents/quantities, never the full order
+ * (Part 22). Uses `return-{returnId}` as the implicit reference (via
+ * claimPartialReturnShippingDispatch) so multiple returns on the same order
+ * never collide.
+ */
+export async function createBorzoPartialReturnPickupAction(orderId: string, returnId: string) {
+  await requireAdminAction();
+  let claimed = false;
+  let shipmentCreated = false;
+
+  try {
+    const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
+    const orderReturn = await prisma.orderReturn.findUniqueOrThrow({
+      where: { id: returnId },
+      include: { items: { include: { orderItem: { include: { listing: true } } } } },
+    });
+
+    if (orderReturn.orderId !== orderId) throw new Error("This return does not belong to this order.");
+    if (orderReturn.status !== "APPROVED") throw new Error("This return has not been approved yet.");
+    if (orderReturn.shippingReconciliationRequired) {
+      throw new Error("Shipment outcome is uncertain. Verify with the provider before creating another.");
+    }
+    if (orderReturn.shippingOrderId) throw new Error("A shipment has already been created for this return.");
+
+    const address = (order.deliveryAddress ?? {}) as DeliveryAddress;
+    const eligibility = checkLocalDeliveryEligibility(process.env.WAREHOUSE_CITY, address.city, address.pincode);
+    if (!eligibility.eligible) {
+      throw new Error(eligibility.reason);
+    }
+
+    assertBorzoConfigured();
+    assertWarehouseConfiguredInProduction();
+
+    const pickup = customerAddressFrom(order);
+    // Only the returned items/quantities — never the full order (Part 22).
+    const totalWeightKg = calculateTotalWeightKg(
+      orderReturn.items.map((line) => ({
+        productName: line.orderItem.productName,
+        quantity: line.quantity,
+        weightKg: line.orderItem.listing?.weightKg != null ? Number(line.orderItem.listing.weightKg) : null,
+      }))
+    );
+
+    if (!(await claimPartialReturnShippingDispatch(returnId))) {
+      throw new Error("A shipment has already been created for this return.");
+    }
+    claimed = true;
+
+    const created = await createLocalDelivery({
+      pickup,
+      drop: warehouseAddress(),
+      matter: buildMatterDescription(orderReturn.items.map((line) => ({ productName: line.orderItem.productName, quantity: line.quantity }))),
+      totalWeightKg,
+    });
+    shipmentCreated = true;
+
+    if (
+      !(await completePartialReturnShippingDispatch(returnId, {
+        provider: "BORZO",
+        shippingOrderId: created.shippingOrderId,
+        shippingShipmentId: null,
+        awbCode: null,
+        courierName: created.courierName,
+        status: created.status,
+        trackingUrl: created.trackingUrl,
+      }))
+    ) {
+      throw new Error("Return shipment claim is no longer current.");
+    }
+  } catch (error) {
+    console.error("[shipping] Borzo partial return pickup creation failed for return", returnId, error);
+    if (claimed) {
+      const failureMessage = error instanceof Error ? error.message : "Could not create this return pickup.";
+      const uncertain = shipmentCreated || isUncertain(error);
+      await failPartialReturnShippingDispatch(returnId, failureMessage, uncertain).catch((dbError) => {
+        console.error("[shipping] Also failed to record partial-return-dispatch-failed state for return", returnId, dbError);
+      });
+    }
+    const message = error instanceof Error ? error.message : "Could not create this return pickup.";
+    redirect(`/admin/orders/${orderId}?error=${encodeURIComponent(message)}`);
+  }
+
+  revalidatePath(`/admin/orders/${orderId}`);
+  revalidatePath("/admin/orders");
+  revalidatePath("/admin/returns");
+}
+
 /** Refreshes one partial return's reverse-shipment tracking status. */
 export async function refreshPartialReturnPickupStatusAction(orderId: string, returnId: string) {
   await requireAdminAction();
@@ -1011,10 +1195,23 @@ export async function refreshPartialReturnPickupStatusAction(orderId: string, re
       throw new Error("This return does not have an active shipment yet.");
     }
 
-    const tracking = await trackShipment({ awbCode: orderReturn.shippingAwbCode, shippingShipmentId: orderReturn.shippingShipmentId });
-    await applyPartialReturnShippingStatus(returnId, tracking.rawStatus);
-    if (tracking.trackingUrl) {
-      await prisma.orderReturn.update({ where: { id: returnId }, data: { shippingTrackingUrl: tracking.trackingUrl } });
+    if (orderReturn.shippingProvider === "BORZO") {
+      const tracking = await trackLocalDelivery(orderReturn.shippingOrderId);
+      const pickedUp = isBorzoReversePickedUp(tracking.status, tracking.pointDeliveryStatus ? [tracking.pointDeliveryStatus] : []);
+      await applyPartialReturnShippingStatus(returnId, tracking.status, pickedUp);
+      await prisma.orderReturn.update({
+        where: { id: returnId },
+        data: {
+          shippingTrackingUrl: tracking.trackingUrl ?? orderReturn.shippingTrackingUrl,
+          shippingCourierName: tracking.courierName ?? orderReturn.shippingCourierName,
+        },
+      });
+    } else {
+      const tracking = await trackShipment({ awbCode: orderReturn.shippingAwbCode, shippingShipmentId: orderReturn.shippingShipmentId });
+      await applyPartialReturnShippingStatus(returnId, tracking.rawStatus, isShiprocketReversePickedUp(tracking.rawStatus));
+      if (tracking.trackingUrl) {
+        await prisma.orderReturn.update({ where: { id: returnId }, data: { shippingTrackingUrl: tracking.trackingUrl } });
+      }
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not refresh shipment status.";

@@ -150,6 +150,8 @@ export type LocalDeliveryResult = {
   trackingUrl: string | null;
   /** A real document URL only (Part 20) — optional, never required for the local-delivery workflow. */
   waybillUrl: string | null;
+  /** The real, committed delivery fee for this booking — null when Borzo genuinely didn't return one, never fabricated. Shown to the customer as informational-only, separate from what they already paid at checkout. */
+  deliveryFeeAmount: number | null;
   courierId: string | null;
   courierName: string | null;
   courierPhone: string | null;
@@ -157,5 +159,12 @@ export type LocalDeliveryResult = {
   /** Only present while a courier is actually assigned and reporting a live position — never derived from an address/pincode/city center (Part 7). */
   courierLatitude: number | null;
   courierLongitude: number | null;
+  /** Real, Borzo-geocoded pickup/drop coordinates — never derived from a pincode or city center. */
+  pickupLatitude: number | null;
+  pickupLongitude: number | null;
+  dropLatitude: number | null;
+  dropLongitude: number | null;
+  /** Borzo's own real driving-distance estimate (meters) from pickup to drop — null when not returned, never estimated ourselves. */
+  distanceMeters: number | null;
   raw: unknown;
 };

@@ -110,6 +110,7 @@ test("createDeliveryOrder normalizes the order id, status, and drop point's trac
         order_id: 12345,
         status: "new",
         status_description: "Waiting for a courier",
+        delivery_fee_amount: 82,
         points: [{ point_id: 1 }, { point_id: 2, tracking_url: "https://borzodelivery.com/track/12345" }],
       },
     });
@@ -120,6 +121,7 @@ test("createDeliveryOrder normalizes the order id, status, and drop point's trac
   assert.equal(result.status, "new");
   assert.equal(result.statusDescription, "Waiting for a courier");
   assert.equal(result.trackingUrl, "https://borzodelivery.com/track/12345");
+  assert.equal(result.deliveryFeeAmount, 82, "the real, committed fee for this booking — shown to the customer");
   assert.ok(!("courierName" in result), "courier data never comes from create-order/orders — only from getCourier");
 });
 
@@ -182,6 +184,7 @@ test("fetchDeliveryStatus returns null tracking url when Borzo doesn't provide o
 
   const result = await fetchDeliveryStatus("1");
   assert.equal(result.trackingUrl, null);
+  assert.equal(result.deliveryFeeAmount, null, "never fabricated as 0 when Borzo doesn't return a fee");
 });
 
 test("fetchDeliveryStatus throws (uncertain) when no order in the response matches the requested id", async () => {

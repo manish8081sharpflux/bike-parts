@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { buildPackage, calculateTotalWeightKg, PackageBuildError } from "@/lib/shipping/package";
-import { isShiprocketReversePickedUp, mapBorzoStatusToOrderStatus } from "@/lib/shipping/status-mapping";
+import { isBorzoReversePickedUp, isShiprocketReversePickedUp, mapBorzoStatusToOrderStatus } from "@/lib/shipping/status-mapping";
 
 // 24. missing product weight prevents shipment
 test("a missing shipping weight blocks package creation, naming the product", () => {
@@ -83,6 +83,18 @@ test("isShiprocketReversePickedUp recognizes collection/in-transit statuses but 
   assert.equal(isShiprocketReversePickedUp("PICKUP EXCEPTION"), false);
 });
 
+// Borzo return pickup — same idea, applied to a Borzo delivery order where
+// the customer's address is the pickup point (see createBorzoReturnPickupAction).
+test("isBorzoReversePickedUp recognizes completed/point-level pickup signals but never 'active' alone", () => {
+  assert.equal(isBorzoReversePickedUp("completed"), true);
+  assert.equal(isBorzoReversePickedUp("active", ["picked up from pickup point"]), true);
+  assert.equal(isBorzoReversePickedUp("active", ["arrived at drop-off"]), true);
+  assert.equal(isBorzoReversePickedUp("active"), false, "no point-level signal yet — courier may only just be assigned");
+  assert.equal(isBorzoReversePickedUp("new"), false);
+  assert.equal(isBorzoReversePickedUp("cancelled"), false);
+  assert.equal(isBorzoReversePickedUp("cancelled", ["picked up from pickup point"]), false, "cancelled always wins");
+});
+
 // calculateTotalWeightKg — Borzo's request shape has no dimensions field, so
 // local deliveries use this instead of buildPackage.
 test("calculateTotalWeightKg sums productWeight x quantity and never approximates a missing weight", () => {
@@ -108,7 +120,7 @@ test("calculateTotalWeightKg sums productWeight x quantity and never approximate
 test("mapBorzoStatusToOrderStatus maps confirmed order-level statuses correctly", () => {
   assert.equal(mapBorzoStatusToOrderStatus("completed"), "DELIVERED");
   assert.equal(mapBorzoStatusToOrderStatus("cancelled"), "CANCELLED");
-  assert.equal(mapBorzoStatusToOrderStatus("active"), "SHIPPED", "no point-level hint -> the coarser but still-confirmed SHIPPED");
+  assert.equal(mapBorzoStatusToOrderStatus("active"), null, "a courier is assigned but nothing confirms the parcel has left yet — stay put, don't guess SHIPPED");
   assert.equal(mapBorzoStatusToOrderStatus("new"), null, "not yet actionable — never advances the order");
   assert.equal(mapBorzoStatusToOrderStatus("available"), null);
   assert.equal(mapBorzoStatusToOrderStatus("delayed"), null, "still in progress — never regresses status");
@@ -117,11 +129,19 @@ test("mapBorzoStatusToOrderStatus maps confirmed order-level statuses correctly"
 test("mapBorzoStatusToOrderStatus upgrades 'active' to OUT_FOR_DELIVERY using a best-effort point-level hint", () => {
   assert.equal(mapBorzoStatusToOrderStatus("active", { pointStatuses: ["arrived at drop-off"] }), "OUT_FOR_DELIVERY");
   assert.equal(mapBorzoStatusToOrderStatus("active", { pointStatuses: ["picked up from pickup point"] }), "OUT_FOR_DELIVERY");
+  // Observed directly from a live Borzo sandbox order once the courier left
+  // the pickup point with the package — see status-mapping.ts's file header.
+  assert.equal(mapBorzoStatusToOrderStatus("active", { pointStatuses: ["courier_departed"] }), "OUT_FOR_DELIVERY");
 });
 
-test("mapBorzoStatusToOrderStatus upgrades 'active' to OUT_FOR_DELIVERY when the courier is reporting a real live position", () => {
-  assert.equal(mapBorzoStatusToOrderStatus("active", { courierHasLiveLocation: true }), "OUT_FOR_DELIVERY");
-  assert.equal(mapBorzoStatusToOrderStatus("active", { courierHasLiveLocation: false }), "SHIPPED");
+test("mapBorzoStatusToOrderStatus treats a 'finished' drop-point status as delivered, and never advances on GPS alone", () => {
+  assert.equal(mapBorzoStatusToOrderStatus("active", { pointStatuses: ["finished"] }), "DELIVERED");
+  // A courier can be broadcasting a live position while still travelling TO
+  // the pickup point — merely having GPS is not proof the parcel departed,
+  // so mapBorzoStatusToOrderStatus no longer even accepts a live-location
+  // hint (see its signature); only a real point-level status can upgrade
+  // "active" to OUT_FOR_DELIVERY.
+  assert.equal(mapBorzoStatusToOrderStatus("active", {}), null);
 });
 
 test("mapBorzoStatusToOrderStatus never crashes on an unrecognized status string", () => {

@@ -16,7 +16,7 @@ export async function createProductAction(formData: FormData) {
   }
 
   revalidatePath("/admin/products");
-  redirect("/admin/products");
+  redirect("/admin/products?created=1");
 }
 
 export async function updateProductAction(id: string, formData: FormData) {
@@ -30,11 +30,12 @@ export async function updateProductAction(id: string, formData: FormData) {
   }
 
   revalidatePath("/admin/products");
-  redirect("/admin/products");
+  redirect("/admin/products?updated=1");
 }
 
 export async function deleteProductAction(id: string) {
   await requireAdminAction();
-  await deleteProduct(id);
+  try { await deleteProduct(id); }
+  catch { redirect("/admin/products?error=" + encodeURIComponent("Could not remove the product. Please try again.")); }
   revalidatePath("/admin/products");
 }

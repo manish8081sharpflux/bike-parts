@@ -15,6 +15,7 @@ import {
   orderStatusFilters,
 } from "./constants";
 import { getAddressIcon, formatAddressLines, parsePrice, formatPrice } from "./utils";
+import { formatOrderNumber } from "@/lib/format";
 
 export function OrderMiniTracker({ order }: { order: Order }) {
   const currentStepIndex = stepIndexForStatus[order.status];
@@ -370,17 +371,20 @@ export function OrderDetailView({
           <ShipmentDetails order={order} />
 
           {/*
-            Return card — where the customer starts a return and tracks it
-            end to end (Requested -> admin Approved/Rejected -> reverse
-            shipment pickup -> Received). Only makes sense once the order was
-            delivered (isDelivered) or a return is already in play — a
-            cancelled order was never received, so there's nothing to
-            return. The refund itself is handled entirely by the Refund
-            card below, which activates automatically once the admin
-            confirms the returned item is back at the warehouse.
+            Legacy whole-order Return card — no longer offered as a starting
+            point for a NEW return (customers only ever get "Item Returns"
+            below now, which covers the same ground per-item/quantity and
+            is less confusing than offering two ways to return the same
+            order). Still rendered — and still tracked end to end (Requested
+            -> admin Approved/Rejected -> reverse shipment pickup ->
+            Received) — whenever one is already in play, so an existing
+            legacy return never becomes invisible. The refund itself is
+            handled entirely by the Refund card below, which activates
+            automatically once the admin confirms the returned item is back
+            at the warehouse.
           */}
-          {order.isPaid && (isDelivered || order.returnStatus !== "none") ? (
-            <div id="order-return-card" className="rounded-xl border border-zinc-100 bg-white p-5 shadow-sm">
+          {order.isPaid && order.returnStatus !== "none" ? (
+            <div className="rounded-xl border border-zinc-100 bg-white p-5 shadow-sm">
               <h3 className="flex items-center gap-2 text-sm font-black text-[#070e2b]">
                 <RotateCw className="size-4.5 text-zinc-500" />
                 Return
@@ -517,7 +521,7 @@ export function OrderDetailView({
             server's row-locked check is authoritative.
           */}
           {order.isPaid && (isDelivered || order.partialReturns.length > 0) ? (
-            <div className="rounded-xl border border-zinc-100 bg-white p-5 shadow-sm">
+            <div id="order-return-card" className="rounded-xl border border-zinc-100 bg-white p-5 shadow-sm">
               <h3 className="flex items-center gap-2 text-sm font-black text-[#070e2b]">
                 <RotateCw className="size-4.5 text-zinc-500" />
                 Item Returns
@@ -725,7 +729,7 @@ export function OrderDetailView({
                 </span>
               </span>
               <span className="shrink-0 text-xs font-bold text-zinc-500">
-                Order #{order.id}
+                Order {formatOrderNumber(new Date(order.placedAt))}
                 <span className="mt-1 block text-[10px] font-normal">Placed on {formatTrackingDate(order.placedAt, true)}</span>
               </span>
             </div>

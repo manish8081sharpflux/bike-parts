@@ -1,16 +1,17 @@
+import { AdminActionForm } from "../../admin-feedback";
 import { ChevronDown } from "lucide-react";
 import { formatInr } from "@/lib/format";
 import type { ShippingProviderName } from "@/app/home/types";
 import {
   approvePartialRefundAction,
   approvePartialReturnAction,
-  dispatchPartialReturnPickupAction,
+  createBorzoPartialReturnPickupAction,
   markPartialReturnReceivedAction,
   refreshPartialReturnPickupStatusAction,
   rejectPartialRefundAction,
   rejectPartialReturnAction,
 } from "@/lib/actions/admin-orders";
-import { ShipmentDispatchForm } from "./ShipmentDispatchForm";
+import { BorzoDeliveryForm } from "./BorzoDeliveryForm";
 
 type PartialReturn = {
   id: string;
@@ -61,7 +62,7 @@ export function PartialReturnsSection({ orderId, orderReturns }: { orderId: stri
 function PartialReturnCard({ orderId, orderReturn, index }: { orderId: string; orderReturn: PartialReturn; index: number }) {
   const boundApprove = approvePartialReturnAction.bind(null, orderId, orderReturn.id);
   const boundReject = rejectPartialReturnAction.bind(null, orderId, orderReturn.id);
-  const boundDispatch = dispatchPartialReturnPickupAction.bind(null, orderId, orderReturn.id);
+  const boundCreateBorzoReturnPickup = createBorzoPartialReturnPickupAction.bind(null, orderId, orderReturn.id);
   const boundRefresh = refreshPartialReturnPickupStatusAction.bind(null, orderId, orderReturn.id);
   const boundMarkReceived = markPartialReturnReceivedAction.bind(null, orderId, orderReturn.id);
   const boundApproveRefund = approvePartialRefundAction.bind(null, orderId, orderReturn.id);
@@ -96,7 +97,7 @@ function PartialReturnCard({ orderId, orderReturn, index }: { orderId: string; o
 
       {orderReturn.status === "REQUESTED" ? (
         <div className="mt-3 flex flex-col gap-2">
-          <form action={boundApprove} className="flex flex-col gap-2">
+          <AdminActionForm action={boundApprove} className="flex flex-col gap-2">
             <textarea
               name="returnAdminNote"
               placeholder="Note for this return (optional)"
@@ -105,8 +106,8 @@ function PartialReturnCard({ orderId, orderReturn, index }: { orderId: string; o
             <button type="submit" className="h-9 rounded-lg bg-emerald-600 text-xs font-bold text-white hover:bg-emerald-700">
               Approve return
             </button>
-          </form>
-          <form action={boundReject} className="flex flex-col gap-2">
+          </AdminActionForm>
+          <AdminActionForm action={boundReject} className="flex flex-col gap-2">
             <textarea
               name="returnAdminNote"
               required
@@ -116,7 +117,7 @@ function PartialReturnCard({ orderId, orderReturn, index }: { orderId: string; o
             <button type="submit" className="h-9 rounded-lg border border-red-200 text-xs font-bold text-red-700 hover:bg-red-50">
               Reject return
             </button>
-          </form>
+          </AdminActionForm>
         </div>
       ) : orderReturn.status === "APPROVED" ? (
         orderReturn.shippingReconciliationRequired ? (
@@ -127,11 +128,14 @@ function PartialReturnCard({ orderId, orderReturn, index }: { orderId: string; o
           </div>
         ) : (
           <div className="mt-3">
-            <ShipmentDispatchForm
-              action={boundDispatch}
-              serviceabilityUrl={`/api/admin/orders/${orderId}/returns/${orderReturn.id}/serviceability`}
+            <p className="mb-2 text-xs text-zinc-500">
+              Creates a Borzo pickup for only this return&apos;s item(s) — the customer&apos;s address becomes the pickup point, the warehouse the drop.
+            </p>
+            <BorzoDeliveryForm
+              action={boundCreateBorzoReturnPickup}
+              quoteUrl={`/api/admin/orders/${orderId}/returns/${orderReturn.id}/borzo-quote`}
+              cardTitle="Borzo Return Pickup"
               submitLabel="Create Return Pickup"
-              description="Creates a reverse shipment for only this return's item(s) — the customer's address becomes the pickup point, the warehouse the drop."
             />
           </div>
         )
@@ -139,7 +143,8 @@ function PartialReturnCard({ orderId, orderReturn, index }: { orderId: string; o
         <div className="mt-3 flex flex-col gap-2">
           {orderReturn.shippingOrderId && orderReturn.shippingOrderId !== "CREATING" ? (
             <p className="text-xs text-zinc-500">
-              Provider: <span className="font-bold">{orderReturn.shippingProvider ?? "Shiprocket"}</span> &bull; Courier:{" "}
+              Provider: <span className="font-bold">{orderReturn.shippingProvider === "BORZO" ? "Borzo" : orderReturn.shippingProvider === "PORTER" ? "Porter" : "Shiprocket"}</span> &bull;{" "}
+              {orderReturn.shippingProvider === "BORZO" ? "Courier/Rider" : "Courier"}:{" "}
               <span className="font-bold">{orderReturn.shippingCourierName ?? "unknown"}</span>
               {orderReturn.shippingAwbCode ? (
                 <>
@@ -151,15 +156,15 @@ function PartialReturnCard({ orderId, orderReturn, index }: { orderId: string; o
           ) : null}
           {orderReturn.shippingTrackingUrl ? (
             <a href={orderReturn.shippingTrackingUrl} target="_blank" rel="noreferrer" className="text-xs font-bold text-[#ff4b1f]">
-              Track Shipment ↗
+              {orderReturn.shippingProvider === "BORZO" ? "Track Delivery" : "Track Shipment"} ↗
             </a>
           ) : null}
-          <form action={boundRefresh}>
+          <AdminActionForm action={boundRefresh}>
             <button type="submit" className="h-9 w-full rounded-lg border border-zinc-200 text-xs font-bold text-zinc-700 hover:bg-zinc-50">
               Refresh Tracking
             </button>
-          </form>
-          <form action={boundMarkReceived} className="flex flex-col gap-2">
+          </AdminActionForm>
+          <AdminActionForm action={boundMarkReceived} className="flex flex-col gap-2">
             <label className="text-xs font-bold text-zinc-700">
               Return condition
               <div className="relative mt-1">
@@ -187,7 +192,7 @@ function PartialReturnCard({ orderId, orderReturn, index }: { orderId: string; o
             <button type="submit" className="h-9 rounded-lg bg-emerald-600 text-xs font-bold text-white hover:bg-emerald-700">
               Mark received at warehouse
             </button>
-          </form>
+          </AdminActionForm>
         </div>
       ) : orderReturn.status === "REJECTED" ? (
         <p className="mt-2 text-xs text-zinc-500">
@@ -231,7 +236,7 @@ function PartialReturnCard({ orderId, orderReturn, index }: { orderId: string; o
 
           {orderReturn.refundStatus === "REQUESTED" ? (
             <div className="mt-2 flex flex-col gap-2">
-              <form action={boundApproveRefund} className="flex flex-col gap-2">
+              <AdminActionForm action={boundApproveRefund} className="flex flex-col gap-2">
                 <textarea
                   name="refundAdminNote"
                   placeholder="Note for this refund (optional)"
@@ -240,8 +245,8 @@ function PartialReturnCard({ orderId, orderReturn, index }: { orderId: string; o
                 <button type="submit" className="h-9 rounded-lg bg-emerald-600 text-xs font-bold text-white hover:bg-emerald-700">
                   Approve &amp; refund via Razorpay
                 </button>
-              </form>
-              <form action={boundRejectRefund} className="flex flex-col gap-2">
+              </AdminActionForm>
+              <AdminActionForm action={boundRejectRefund} className="flex flex-col gap-2">
                 <textarea
                   name="refundAdminNote"
                   required
@@ -251,7 +256,7 @@ function PartialReturnCard({ orderId, orderReturn, index }: { orderId: string; o
                 <button type="submit" className="h-9 rounded-lg border border-red-200 text-xs font-bold text-red-700 hover:bg-red-50">
                   Reject refund
                 </button>
-              </form>
+              </AdminActionForm>
             </div>
           ) : orderReturn.refundStatus === "PROCESSING" ? (
             <p className="mt-2 rounded-lg bg-blue-50 px-3 py-2 text-xs font-medium text-blue-700">

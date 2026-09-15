@@ -877,6 +877,12 @@ export function HomeClient({ products }: { products: Product[] }) {
           deliveryExecutiveLatitude: number | null;
           deliveryExecutiveLongitude: number | null;
           shippingWaybillUrl: string | null;
+          shippingDeliveryFeeAmount: number | null;
+          shippingPickupLatitude: number | null;
+          shippingPickupLongitude: number | null;
+          shippingDropLatitude: number | null;
+          shippingDropLongitude: number | null;
+          shippingDistanceMeters: number | null;
           shippingLastUpdatedAt: string | null;
           shippingEstimatedDeliveryAt: string | null;
           deliveryAddress: Partial<Address> | null;
@@ -997,6 +1003,12 @@ export function HomeClient({ products }: { products: Product[] }) {
             deliveryExecutiveLatitude: dbOrder.deliveryExecutiveLatitude,
             deliveryExecutiveLongitude: dbOrder.deliveryExecutiveLongitude,
             shippingWaybillUrl: dbOrder.shippingWaybillUrl,
+            shippingDeliveryFeeAmount: dbOrder.shippingDeliveryFeeAmount,
+            shippingPickupLatitude: dbOrder.shippingPickupLatitude,
+            shippingPickupLongitude: dbOrder.shippingPickupLongitude,
+            shippingDropLatitude: dbOrder.shippingDropLatitude,
+            shippingDropLongitude: dbOrder.shippingDropLongitude,
+            shippingDistanceMeters: dbOrder.shippingDistanceMeters,
             shippingLastUpdatedAt: dbOrder.shippingLastUpdatedAt,
             shippingEstimatedDeliveryAt: dbOrder.shippingEstimatedDeliveryAt,
             refundStatus: mapDbRefundStatus(dbOrder.refundStatus),
@@ -1095,6 +1107,43 @@ export function HomeClient({ products }: { products: Product[] }) {
     if (isAuthenticated) void refreshOrders();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated]);
+
+  // Keeps a Borzo order's tracking screen live while the customer actually
+  // has it open — courier assignment/live position/status previously only
+  // ever updated when an admin happened to click "Refresh Tracking" on a
+  // completely different (admin) screen, which is why a genuinely-assigned
+  // courier could sit invisible on the customer's own order page for hours.
+  // See app/api/orders/[id]/refresh-tracking for the server side; cheap and
+  // safe to call repeatedly since it no-ops for a non-Borzo/finished order
+  // or one refreshed too recently.
+  useEffect(() => {
+    if (!viewedOrder) return;
+    if (viewedOrder.shippingProvider !== "BORZO") return;
+    if (viewedOrder.status === "delivered" || viewedOrder.status === "cancelled") return;
+
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        await fetch(`/api/orders/${viewedOrder.dbId}/refresh-tracking`, { method: "POST" });
+      } catch {
+        // Best-effort — a transient failure just means the next tick tries again.
+      }
+      if (!cancelled) await refreshOrders();
+    };
+
+    void poll();
+    const timer = window.setInterval(() => void poll(), 20_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+    // refreshOrders is intentionally omitted — its identity changes every
+    // render but it only ever re-fetches from the server and replaces
+    // state wholesale, so the closure captured here never goes stale in a
+    // way that matters; re-keying only on the order's own identity/status
+    // is what actually determines whether this effect should be running.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewedOrder?.dbId, viewedOrder?.shippingProvider, viewedOrder?.status]);
 
   const openOrdersList = () => {
     setSelectedProduct(null);
@@ -2724,6 +2773,7 @@ export function HomeClient({ products }: { products: Product[] }) {
         isOpen={isCartOpen}
         items={cartItems}
         isAuthenticated={isAuthenticated}
+        addressId={selectedAddressId}
         notice={cartNotice}
         onDismissNotice={() => setCartNotice(null)}
         onClose={() => setIsCartOpen(false)}

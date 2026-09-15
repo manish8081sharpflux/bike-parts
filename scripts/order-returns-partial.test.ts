@@ -296,7 +296,7 @@ test("a resellable partial return restores only the returned quantity, not the f
   await approvePartialReturn(created.id, "ok");
   await claimPartialReturnShippingDispatch(created.id);
   await completePartialReturnShippingDispatch(created.id, { provider: "SHIPROCKET", shippingOrderId: "sr-x", shippingShipmentId: null, awbCode: null, courierName: "Test Courier", status: "created", trackingUrl: null });
-  await applyPartialReturnShippingStatus(created.id, "PICKED UP");
+  await applyPartialReturnShippingStatus(created.id, "PICKED UP", true);
 
   const result = await markPartialReturnReceived(created.id, "ok", "RESELLABLE");
   assert.equal(result.received, true);
@@ -314,7 +314,7 @@ test("a damaged partial return restores zero stock", async () => {
   await approvePartialReturn(created.id, "ok");
   await claimPartialReturnShippingDispatch(created.id);
   await completePartialReturnShippingDispatch(created.id, { provider: "SHIPROCKET", shippingOrderId: "sr-y", shippingShipmentId: null, awbCode: null, courierName: "Test Courier", status: "created", trackingUrl: null });
-  await applyPartialReturnShippingStatus(created.id, "PICKED UP");
+  await applyPartialReturnShippingStatus(created.id, "PICKED UP", true);
 
   const result = await markPartialReturnReceived(created.id, "cracked", "DAMAGED");
   assert.equal(result.received, true);
@@ -332,7 +332,7 @@ test("repeating mark-received on an already-received return does not double-rest
   await approvePartialReturn(created.id, "ok");
   await claimPartialReturnShippingDispatch(created.id);
   await completePartialReturnShippingDispatch(created.id, { provider: "SHIPROCKET", shippingOrderId: "sr-z", shippingShipmentId: null, awbCode: null, courierName: "Test Courier", status: "created", trackingUrl: null });
-  await applyPartialReturnShippingStatus(created.id, "PICKED UP");
+  await applyPartialReturnShippingStatus(created.id, "PICKED UP", true);
 
   await markPartialReturnReceived(created.id, "ok", "RESELLABLE");
   const repeat = await markPartialReturnReceived(created.id, "ok again", "RESELLABLE");
@@ -353,7 +353,7 @@ test("refund amount uses OrderItem.unitPrice at purchase time, not the current l
   await approvePartialReturn(created.id, "ok");
   await claimPartialReturnShippingDispatch(created.id);
   await completePartialReturnShippingDispatch(created.id, { provider: "SHIPROCKET", shippingOrderId: "sr-refund", shippingShipmentId: null, awbCode: null, courierName: "Test Courier", status: "created", trackingUrl: null });
-  await applyPartialReturnShippingStatus(created.id, "PICKED UP");
+  await applyPartialReturnShippingStatus(created.id, "PICKED UP", true);
   await markPartialReturnReceived(created.id, "ok", "RESELLABLE");
 
   const afterReceive = await prisma.orderReturn.findUniqueOrThrow({ where: { id: created.id } });
@@ -374,7 +374,7 @@ test("multiple partial refunds on one order never sum to more than the amount pa
     await approvePartialReturn(returnId, "ok");
     await claimPartialReturnShippingDispatch(returnId);
     await completePartialReturnShippingDispatch(returnId, { provider: "SHIPROCKET", shippingOrderId: `sr-${returnId}`, shippingShipmentId: null, awbCode: null, courierName: "Test Courier", status: "created", trackingUrl: null });
-    await applyPartialReturnShippingStatus(returnId, "PICKED UP");
+    await applyPartialReturnShippingStatus(returnId, "PICKED UP", true);
     await markPartialReturnReceived(returnId, "ok", "RESELLABLE");
   }
 

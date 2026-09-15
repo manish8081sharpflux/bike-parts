@@ -174,12 +174,18 @@ function toLocalDeliveryResult(order: borzo.BorzoOrderResult, courier: borzo.Bor
     pointDeliveryStatus: order.pointDeliveryStatus,
     trackingUrl: order.trackingUrl,
     waybillUrl: order.waybillUrl,
+    deliveryFeeAmount: order.deliveryFeeAmount,
     courierId: courier.courierId,
     courierName: courier.name,
     courierPhone: courier.phone,
     courierPhotoUrl: courier.photoUrl,
     courierLatitude: courier.latitude,
     courierLongitude: courier.longitude,
+    pickupLatitude: order.pickupLatitude,
+    pickupLongitude: order.pickupLongitude,
+    dropLatitude: order.dropLatitude,
+    dropLongitude: order.dropLongitude,
+    distanceMeters: order.distanceMeters,
     raw: order.raw,
   };
 }

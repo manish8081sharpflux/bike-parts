@@ -1,4 +1,6 @@
 "use client";
+import { AdminActionForm } from "../../admin-feedback";
+
 
 import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
@@ -67,7 +69,7 @@ export function ShipmentDispatchForm({
   const blockedByDimensions = !usesRealDimensions && !dimensionsConfirmed;
 
   return (
-    <form action={action} className="flex flex-col gap-2">
+    <AdminActionForm action={action} className="flex flex-col gap-2">
       <p className="text-xs text-zinc-500">{description}</p>
 
       {loading ? (
@@ -132,6 +134,6 @@ export function ShipmentDispatchForm({
       >
         {submitLabel}
       </button>
-    </form>
+    </AdminActionForm>
   );
 }

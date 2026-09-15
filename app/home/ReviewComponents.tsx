@@ -50,7 +50,8 @@ export function PurchaseReviewEditor({ orderId, orderItemId, productName, review
       {review.reviewText ? <p className="whitespace-pre-wrap break-words text-sm text-zinc-600">{review.reviewText}</p> : null}
       <button type="button" onClick={() => { setRating(review.rating); setReviewText(review.reviewText ?? ""); setEditing(true); setSaved(false); }} className="block text-xs font-semibold text-orange-700 underline">Edit Review</button>
     </div> : <form onSubmit={submit} className="mt-2 space-y-3">
-      <fieldset disabled={saving}>
+      {/* `relative` keeps the sr-only legend's containing block scoped to this fieldset — see product-form.tsx's Section component for the page-scroll bug an unpositioned ancestor causes with an absolutely-positioned sr-only element. */}
+      <fieldset disabled={saving} className="relative">
         <legend className="sr-only">Rating (required)</legend>
         <div className="flex gap-2">
           {[1, 2, 3, 4, 5].map((star) => <label key={star} className="relative cursor-pointer">

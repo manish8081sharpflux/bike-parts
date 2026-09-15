@@ -162,6 +162,14 @@ export type Order = {
   deliveryExecutiveLongitude?: number | null;
   /** A real Borzo waybill/document URL only — optional, shown to admin only. */
   shippingWaybillUrl?: string | null;
+  /** Real, committed provider fee (Borzo today) — informational only, separate from `deliveryCharge` (what was actually paid at checkout). Never fabricated; absent for Shiprocket/Porter rows. */
+  shippingDeliveryFeeAmount?: number | null;
+  /** Real, Borzo-geocoded pickup/drop coordinates and Borzo's own real driving-distance estimate between them — never derived from a pincode or city center. Absent for Shiprocket/Porter rows. */
+  shippingPickupLatitude?: number | null;
+  shippingPickupLongitude?: number | null;
+  shippingDropLatitude?: number | null;
+  shippingDropLongitude?: number | null;
+  shippingDistanceMeters?: number | null;
   supportEmail?: string | null;
   supportPhone?: string | null;
   bikeLabel: string;

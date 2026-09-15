@@ -1,7 +1,6 @@
 import { Prisma, type ShippingProvider } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { requestRefund } from "@/lib/order-refund-state";
-import { isShiprocketReversePickedUp } from "@/lib/shipping/status-mapping";
 
 export type ReturnRequestResult = "requested" | "already_requested" | "not_returnable";
 
@@ -173,12 +172,19 @@ export async function failReturnShippingDispatch(orderId: string, failureMessage
   });
 }
 
-/** Applies a raw shipping-provider status string for the reverse shipment — moves PICKUP_SCHEDULED to PICKED_UP once the provider reports the item collected from the customer. */
-export async function applyReturnShippingStatus(orderId: string, rawStatus: string) {
+/**
+ * Applies a raw shipping-provider status string for the reverse shipment —
+ * moves PICKUP_SCHEDULED to PICKED_UP once the provider reports the item
+ * collected from the customer. `pickedUp` is precomputed by the caller
+ * (isShiprocketReversePickedUp or isBorzoReversePickedUp — see
+ * lib/shipping/status-mapping.ts) since each provider's status vocabulary
+ * differs; this function only ever applies the one shared transition rule.
+ */
+export async function applyReturnShippingStatus(orderId: string, rawStatus: string, pickedUp: boolean) {
   return prisma.$transaction(async (tx) => {
     await tx.order.update({ where: { id: orderId }, data: { returnShippingStatus: rawStatus } });
 
-    if (!isShiprocketReversePickedUp(rawStatus)) return { transitioned: false };
+    if (!pickedUp) return { transitioned: false };
 
     const transitioned = await tx.order.updateMany({
       where: { id: orderId, returnStatus: "PICKUP_SCHEDULED" },

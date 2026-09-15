@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
-import { formatInr } from "@/lib/format";
+import { formatInr, formatOrderNumber } from "@/lib/format";
 import { deleteCustomerAction } from "@/lib/actions/admin-customers";
+import { DeleteConfirmButton } from "../../DeleteConfirmButton";
 
 export const dynamic = "force-dynamic";
 
@@ -52,14 +53,13 @@ export default async function AdminCustomerDetailPage({
             Customer since {customer.createdAt.toLocaleDateString("en-IN")}
           </p>
         </div>
-        <form action={deleteCustomerAction.bind(null, customer.id)}>
-          <button
-            type="submit"
-            className="h-10 shrink-0 rounded-lg border border-zinc-200 px-4 text-xs font-bold text-zinc-500 hover:border-red-200 hover:text-red-600"
-          >
-            Delete customer
-          </button>
-        </form>
+        <DeleteConfirmButton
+          itemLabel={customer.name ?? "this customer"}
+          title="Delete this customer?"
+          triggerLabel="Delete customer"
+          triggerClassName="inline-flex h-10 shrink-0 items-center justify-center rounded-lg border border-red-200 bg-white px-4 text-xs font-bold text-red-600 transition hover:bg-red-50"
+          action={deleteCustomerAction.bind(null, customer.id)}
+        />
       </div>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -112,7 +112,7 @@ export default async function AdminCustomerDetailPage({
               {customer.orders.map((order) => (
                 <tr key={order.id} className="border-b border-zinc-50 last:border-0">
                   <td className="py-2.5 pr-3 font-mono text-xs text-zinc-500">
-                    #{order.id.slice(-8)}
+                    {formatOrderNumber(order.createdAt)}
                     <div className="text-[10px] text-zinc-400">
                       {order.createdAt.toLocaleString("en-IN")}
                     </div>

@@ -308,6 +308,22 @@ model Order {
   // accuracy task) — optional, never required for the local-delivery
   // workflow, never populated for Shiprocket/Porter rows.
   shippingWaybillUrl                   String?
+  // The real, committed Borzo delivery fee for this booking — shown to the
+  // customer as informational-only (see ShipmentComponents.tsx), separate
+  // from deliveryCharge (what they actually paid at checkout, fixed at
+  // Razorpay payment time). Never fabricated; never populated for
+  // Shiprocket/Porter rows, which have no equivalent per-shipment fee here.
+  shippingDeliveryFeeAmount            Decimal?          @db.Decimal(10, 2)
+  // Real, Borzo-geocoded pickup/drop coordinates and Borzo's own real
+  // driving-distance estimate between them (points[]/previous_point_driving_
+  // distance_meters — confirmed from a live test-account response) — shown
+  // on a real map to the customer, never derived from a pincode or city
+  // center. Never populated for Shiprocket/Porter rows.
+  shippingPickupLatitude               Float?
+  shippingPickupLongitude              Float?
+  shippingDropLatitude                 Float?
+  shippingDropLongitude                Float?
+  shippingDistanceMeters               Int?
   shippingLastUpdatedAt                DateTime?
   shippingEstimatedDeliveryAt          DateTime?
   shippingReconciliationRequired       Boolean           @default(false)

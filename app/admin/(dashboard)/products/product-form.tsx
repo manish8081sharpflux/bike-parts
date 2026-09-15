@@ -1,4 +1,6 @@
 "use client";
+import { AdminActionForm } from "../admin-feedback";
+
 
 import { useEffect, useRef, useState } from "react";
 import type { ChangeEvent, InputHTMLAttributes, ReactNode } from "react";
@@ -33,7 +35,17 @@ function Field({ label, ...props }: InputHTMLAttributes<HTMLInputElement> & { la
   return <label className="flex min-w-0 flex-col gap-1 text-sm font-semibold text-zinc-700"><span>{label}{props.required ? <span className="ml-1 text-[#e63e16]">*</span> : null}</span><input {...props} className={inputClass} /></label>;
 }
 function Section({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
-  return <fieldset className="min-w-0 rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm sm:p-6">
+  // `relative` matters here, not just for polish: the sr-only <legend> below
+  // is `position: absolute` with no inset offsets (Tailwind's sr-only), so
+  // it renders at its normal in-flow position — but *positioned* relative to
+  // the nearest ancestor that isn't `static`. Without `relative` on this
+  // fieldset, that ancestor search falls all the way through to the
+  // document root, and a legend belonging to a fieldset far down a long
+  // form (e.g. "Package Contents") ends up expanding the *whole page's*
+  // scrollable height to reach it — even though it's a visually
+  // 1px/clipped element — which is what caused the admin product form to
+  // scroll far past its actual visible content into blank space.
+  return <fieldset className="relative min-w-0 rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm sm:p-6">
     <legend className="sr-only">{title}</legend>
     <div className="mb-5 border-b border-zinc-100 pb-4">
       <h2 className="text-sm font-bold tracking-tight text-zinc-900">{title}</h2>
@@ -318,7 +330,7 @@ export function ProductForm({ action, defaultValues: v = {}, submitLabel }: {
   const [category, setCategory] = useState(v.category ?? "");
   const [subcategory, setSubcategory] = useState(v.productType ?? "");
   const subcategoryOptions = SUBCATEGORIES_BY_CATEGORY[category] ?? [];
-  return <form action={action} className="flex w-full flex-col gap-5">
+  return <AdminActionForm action={action} className="flex w-full flex-col gap-5">
     <div className="flex items-center gap-3 rounded-2xl border border-orange-100 bg-orange-50/60 px-5 py-4">
       <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-white text-[#ff4b1f]"><Package className="size-5" /></span>
       <div><p className="text-sm font-semibold text-zinc-900">Build a complete product listing</p><p className="mt-1 text-xs leading-5 text-zinc-500">Add clear photos, accurate specifications and bike compatibility to help customers find the right part.</p></div>
@@ -432,5 +444,5 @@ export function ProductForm({ action, defaultValues: v = {}, submitLabel }: {
       </div>
     </details>
     <SaveBar label={submitLabel} />
-  </form>;
+  </AdminActionForm>;
 }

@@ -137,7 +137,7 @@ test("full happy path: request -> approve -> dispatch -> picked up -> received (
   assert.equal(afterDispatch.returnShippingAwbCode, "return-1-awb");
   assert.equal(afterDispatch.returnShippingCourierName, "Test Courier");
 
-  const applied = await applyReturnShippingStatus(order.id, "PICKED UP");
+  const applied = await applyReturnShippingStatus(order.id, "PICKED UP", true);
   assert.equal(applied.transitioned, true);
   assert.equal((await prisma.order.findUniqueOrThrow({ where: { id: order.id } })).returnStatus, "PICKED_UP");
 
@@ -175,7 +175,7 @@ test("mark received with condition DAMAGED does not restore stock", async () => 
   await approveReturn(order.id, "ok");
   await claimReturnShippingDispatch(order.id);
   await completeReturnShippingDispatch(order.id, shipmentResult("return-damaged"));
-  await applyReturnShippingStatus(order.id, "PICKED UP");
+  await applyReturnShippingStatus(order.id, "PICKED UP", true);
 
   const result = await markReturnReceived(order.id, "Cracked casing, scrap", "DAMAGED");
   assert.equal(result.received, true);

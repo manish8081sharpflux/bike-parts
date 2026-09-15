@@ -4,6 +4,8 @@ import { formatInr } from "@/lib/format";
 import { deleteCustomerAction } from "@/lib/actions/admin-customers";
 import { AdminPagination, parsePage } from "../admin-pagination";
 import { AutoSubmitFilterForm } from "../auto-submit-filter-form";
+import { DeleteConfirmButton } from "../DeleteConfirmButton";
+import { SuccessPopup } from "../SuccessPopup";
 
 export const dynamic = "force-dynamic";
 
@@ -12,9 +14,9 @@ const PAGE_SIZE = 10;
 export default async function AdminCustomersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; page?: string; error?: string; source?: string }>;
+  searchParams: Promise<{ q?: string; page?: string; error?: string; source?: string; created?: string }>;
 }) {
-  const { q, page: pageRaw, error, source } = await searchParams;
+  const { q, page: pageRaw, error, source, created } = await searchParams;
   const query = q?.trim();
   const sourceFilter = source === "admin" || source === "self" ? source : undefined;
   const page = parsePage(pageRaw);
@@ -59,6 +61,7 @@ export default async function AdminCustomersPage({
 
   return (
     <div className="flex flex-col gap-4">
+      <SuccessPopup show={created === "1"} message="Customer added successfully." />
       <div className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-black">Customers</h1>
@@ -168,18 +171,15 @@ export default async function AdminCustomersPage({
                     <div className="flex items-center gap-3">
                       <Link
                         href={`/admin/customers/${customer.id}`}
-                        className="text-xs font-bold text-[#ff4b1f]"
+                        className="inline-flex h-8 items-center justify-center rounded-lg border border-zinc-200 px-3 text-xs font-bold text-zinc-700 transition hover:border-orange-200 hover:bg-orange-50 hover:text-orange-700"
                       >
                         View
                       </Link>
-                      <form action={deleteCustomerAction.bind(null, customer.id)}>
-                        <button
-                          type="submit"
-                          className="text-xs font-bold text-zinc-400 hover:text-red-600"
-                        >
-                          Delete
-                        </button>
-                      </form>
+                      <DeleteConfirmButton
+                        itemLabel={customer.name ?? customer.phone ?? "this customer"}
+                        title="Delete this customer?"
+                        action={deleteCustomerAction.bind(null, customer.id)}
+                      />
                     </div>
                   </td>
                 </tr>

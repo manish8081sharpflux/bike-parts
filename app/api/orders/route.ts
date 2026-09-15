@@ -73,6 +73,20 @@ export async function GET() {
         deliveryExecutiveLatitude: order.deliveryExecutiveLatitude,
         deliveryExecutiveLongitude: order.deliveryExecutiveLongitude,
         shippingWaybillUrl: order.shippingWaybillUrl,
+        // Real, committed provider fee (Borzo today) — informational only,
+        // separate from deliveryCharge (what the customer actually paid at
+        // checkout, fixed at Razorpay payment time). Never fabricated;
+        // null for Shiprocket/Porter rows.
+        shippingDeliveryFeeAmount: order.shippingDeliveryFeeAmount === null ? null : Number(order.shippingDeliveryFeeAmount),
+        // Real, Borzo-geocoded pickup/drop coordinates and Borzo's own real
+        // driving-distance estimate between them — shown on a real map,
+        // never derived from a pincode or city center. Null for
+        // Shiprocket/Porter rows.
+        shippingPickupLatitude: order.shippingPickupLatitude,
+        shippingPickupLongitude: order.shippingPickupLongitude,
+        shippingDropLatitude: order.shippingDropLatitude,
+        shippingDropLongitude: order.shippingDropLongitude,
+        shippingDistanceMeters: order.shippingDistanceMeters,
         shippingLastUpdatedAt: order.shippingLastUpdatedAt ? order.shippingLastUpdatedAt.toISOString() : null,
         shippingEstimatedDeliveryAt: order.shippingEstimatedDeliveryAt ? order.shippingEstimatedDeliveryAt.toISOString() : null,
         refundStatus: order.refundStatus,
