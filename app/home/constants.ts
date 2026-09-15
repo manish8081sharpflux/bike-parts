@@ -58,7 +58,7 @@ export const brands = [
     logo: "Royal Enfield",
     modalLogo: "Royal Enfield",
     tagline: "Pure Motorcycling",
-    color: "text-orange-700",
+    color: "text-[#047857]",
     image: "/assets/home/bike-royal-enfield.png",
     card: "/complete_bike_brand_cards/card-royal-enfield.png",
   },
@@ -76,7 +76,7 @@ export const brands = [
     logo: "KTM",
     modalLogo: "KTM",
     tagline: "Ready To Race",
-    color: "text-orange-600",
+    color: "text-[#059669]",
     image: "/assets/home/bike-bajaj.png",
     card: "/complete_bike_brand_cards/card-ktm.png",
   },
@@ -459,7 +459,7 @@ export const initialAddresses: Address[] = [];
 
 
 export const addressIcons: Record<string, { icon: LucideIcon; className: string }> = {
-  Home: { icon: HomeIcon, className: "bg-[#fff0eb] text-[#ff4b1f]" },
+  Home: { icon: HomeIcon, className: "bg-[#e9fef5] text-[#025632]" },
   Office: { icon: Building2, className: "bg-blue-50 text-blue-600" },
   Shop: { icon: Store, className: "bg-violet-50 text-violet-600" },
   Other: { icon: MapPin, className: "bg-emerald-50 text-emerald-600" },
@@ -483,7 +483,7 @@ export const orderStatusMeta: Record<
     iconClassName: "bg-amber-50 text-amber-600",
     bannerClassName: "bg-amber-50 text-amber-700",
   },
-  shipped: { label: "Shipped", icon: Truck, iconClassName: "bg-orange-50 text-orange-600", bannerClassName: "bg-orange-50 text-orange-700" },
+  shipped: { label: "Shipped", icon: Truck, iconClassName: "bg-[#ecfdf5] text-[#059669]", bannerClassName: "bg-[#ecfdf5] text-[#047857]" },
   out_for_delivery: {
     label: "Out for Delivery",
     icon: Truck,

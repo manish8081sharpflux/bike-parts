@@ -29,10 +29,10 @@ type Values = {
   warrantyMonths?: number | null; countryOfOrigin?: string | null; offerLabel?: string | null;
   deliveryDaysMin?: number | string | null; deliveryDaysMax?: number | string | null;
 };
-const inputClass = "w-full min-w-0 rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-sm font-normal text-zinc-900 shadow-sm outline-none transition placeholder:text-zinc-400 focus:border-[#ff4b1f] focus:ring-2 focus:ring-orange-100 disabled:bg-zinc-50 file:mr-3 file:rounded-lg file:border-0 file:bg-orange-50 file:px-3 file:py-1 file:text-xs file:font-semibold file:text-orange-700";
-const buttonClass = "rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-700 transition hover:border-orange-200 hover:bg-orange-50 hover:text-orange-700 focus-visible:outline-2 focus-visible:outline-[#ff4b1f]";
+const inputClass = "w-full min-w-0 rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-sm font-normal text-zinc-900 shadow-sm outline-none transition placeholder:text-zinc-400 focus:border-[#025632] focus:ring-2 focus:ring-[#d1fae5] disabled:bg-zinc-50 file:mr-3 file:rounded-lg file:border-0 file:bg-[#ecfdf5] file:px-3 file:py-1 file:text-xs file:font-semibold file:text-[#047857]";
+const buttonClass = "rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-700 transition hover:border-[#a7f3d0] hover:bg-[#ecfdf5] hover:text-[#047857] focus-visible:outline-2 focus-visible:outline-[#025632]";
 function Field({ label, ...props }: InputHTMLAttributes<HTMLInputElement> & { label: string }) {
-  return <label className="flex min-w-0 flex-col gap-1 text-sm font-semibold text-zinc-700"><span>{label}{props.required ? <span className="ml-1 text-[#e63e16]">*</span> : null}</span><input {...props} className={inputClass} /></label>;
+  return <label className="flex min-w-0 flex-col gap-1 text-sm font-semibold text-zinc-700"><span>{label}{props.required ? <span className="ml-1 text-[#013720]">*</span> : null}</span><input {...props} className={inputClass} /></label>;
 }
 function Section({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
   // `relative` matters here, not just for polish: the sr-only <legend> below
@@ -60,7 +60,7 @@ function SaveBar({ label }: { label: string }) {
     <p className="text-xs text-zinc-500">Review your product information before saving.</p>
     <div className="flex items-center gap-3">
       <Link href="/admin/products" className={buttonClass}>Cancel</Link>
-      <button type="submit" disabled={pending} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-[#ff4b1f] px-5 text-sm font-bold text-white shadow-sm transition hover:bg-[#e63e16] disabled:cursor-wait disabled:opacity-60">
+      <button type="submit" disabled={pending} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-[#025632] px-5 text-sm font-bold text-white shadow-sm transition hover:bg-[#013720] disabled:cursor-wait disabled:opacity-60">
         {pending ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
         {pending ? "Saving product..." : label}
       </button>
@@ -172,7 +172,7 @@ function Select({
               } ${option === selected ? "font-semibold text-zinc-950" : "text-zinc-700"}`}
             >
               <span className="truncate">{option}</span>
-              {option === selected ? <Check className="size-4 shrink-0 text-[#ff4b1f]" /> : null}
+              {option === selected ? <Check className="size-4 shrink-0 text-[#025632]" /> : null}
             </button>
           ))}
         </div>
@@ -210,7 +210,7 @@ function Combobox({
   const listId = `${name}-options`;
   return (
     <label className="flex min-w-0 flex-col gap-1 text-sm font-semibold text-zinc-700">
-      <span>{label}{required ? <span className="ml-1 text-[#e63e16]">*</span> : null}</span>
+      <span>{label}{required ? <span className="ml-1 text-[#013720]">*</span> : null}</span>
       <input
         name={name}
         list={listId}
@@ -270,13 +270,13 @@ function GalleryFileUpload({ name, accept, max }: { name: string; accept: string
       {files.length ? (
         <ul className="flex flex-wrap gap-2">
           {files.map((file, index) => (
-            <li key={`${file.name}-${file.lastModified}-${index}`} className="flex max-w-full items-center gap-1.5 rounded-full bg-orange-50 py-1 pl-3 pr-1.5 text-xs font-medium text-orange-700">
+            <li key={`${file.name}-${file.lastModified}-${index}`} className="flex max-w-full items-center gap-1.5 rounded-full bg-[#ecfdf5] py-1 pl-3 pr-1.5 text-xs font-medium text-[#047857]">
               <span className="max-w-[10rem] truncate">{file.name}</span>
               <button
                 type="button"
                 onClick={() => removeAt(index)}
                 aria-label={`Remove ${file.name}`}
-                className="grid size-4 shrink-0 place-items-center rounded-full text-orange-700 hover:bg-orange-100"
+                className="grid size-4 shrink-0 place-items-center rounded-full text-[#047857] hover:bg-[#d1fae5]"
               >
                 ×
               </button>
@@ -331,8 +331,8 @@ export function ProductForm({ action, defaultValues: v = {}, submitLabel }: {
   const [subcategory, setSubcategory] = useState(v.productType ?? "");
   const subcategoryOptions = SUBCATEGORIES_BY_CATEGORY[category] ?? [];
   return <AdminActionForm action={action} className="flex w-full flex-col gap-5">
-    <div className="flex items-center gap-3 rounded-2xl border border-orange-100 bg-orange-50/60 px-5 py-4">
-      <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-white text-[#ff4b1f]"><Package className="size-5" /></span>
+    <div className="flex items-center gap-3 rounded-2xl border border-[#d1fae5] bg-[#ecfdf5]/60 px-5 py-4">
+      <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-white text-[#025632]"><Package className="size-5" /></span>
       <div><p className="text-sm font-semibold text-zinc-900">Build a complete product listing</p><p className="mt-1 text-xs leading-5 text-zinc-500">Add clear photos, accurate specifications and bike compatibility to help customers find the right part.</p></div>
     </div>
     <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">

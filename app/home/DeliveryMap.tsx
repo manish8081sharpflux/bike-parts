@@ -18,7 +18,7 @@ function pin(color: string, label: string) {
 }
 
 const pickupIcon = pin("#6b7280", "P");
-const dropIcon = pin("#ff4b1f", "D");
+const dropIcon = pin("#025632", "D");
 const riderIcon = pin("#10b981", "●");
 
 /** Fits the map's viewport to include every real point passed in — re-runs whenever the actual set of points changes (e.g. once a rider's live position first appears). */

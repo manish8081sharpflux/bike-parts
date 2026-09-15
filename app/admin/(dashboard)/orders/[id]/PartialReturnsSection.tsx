@@ -155,7 +155,7 @@ function PartialReturnCard({ orderId, orderReturn, index }: { orderId: string; o
             </p>
           ) : null}
           {orderReturn.shippingTrackingUrl ? (
-            <a href={orderReturn.shippingTrackingUrl} target="_blank" rel="noreferrer" className="text-xs font-bold text-[#ff4b1f]">
+            <a href={orderReturn.shippingTrackingUrl} target="_blank" rel="noreferrer" className="text-xs font-bold text-[#025632]">
               {orderReturn.shippingProvider === "BORZO" ? "Track Delivery" : "Track Shipment"} ↗
             </a>
           ) : null}
@@ -172,7 +172,7 @@ function PartialReturnCard({ orderId, orderReturn, index }: { orderId: string; o
                   name="returnCondition"
                   required
                   defaultValue=""
-                  className="h-9 w-full appearance-none rounded-lg border border-zinc-300 bg-white px-3 pr-9 text-xs font-semibold text-[#070e2b] outline-none transition focus:border-[#ff4b1f] focus:ring-2 focus:ring-[#ff4b1f]/15"
+                  className="h-9 w-full appearance-none rounded-lg border border-zinc-300 bg-white px-3 pr-9 text-xs font-semibold text-[#070e2b] outline-none transition focus:border-[#025632] focus:ring-2 focus:ring-[#025632]/15"
                 >
                   <option value="" disabled>Choose condition…</option>
                   <option value="RESELLABLE">Resellable — restock these items</option>

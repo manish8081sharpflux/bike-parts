@@ -86,7 +86,7 @@ export function BorzoDeliveryForm({
       </div>
       <button
         type="submit"
-        className="flex h-10 w-full items-center justify-center gap-1.5 rounded-lg bg-[#ff4b1f] text-sm font-bold text-white transition hover:bg-[#e8330e]"
+        className="flex h-10 w-full items-center justify-center gap-1.5 rounded-lg bg-[#025632] text-sm font-bold text-white transition hover:bg-[#013720]"
       >
         {submitLabel}
       </button>

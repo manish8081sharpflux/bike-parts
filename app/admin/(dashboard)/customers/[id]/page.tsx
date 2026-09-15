@@ -142,7 +142,7 @@ export default async function AdminCustomerDetailPage({
                   <td className="py-2.5 pr-3">
                     <Link
                       href={`/admin/orders/${order.id}`}
-                      className="text-xs font-bold text-[#ff4b1f]"
+                      className="text-xs font-bold text-[#025632]"
                     >
                       View
                     </Link>

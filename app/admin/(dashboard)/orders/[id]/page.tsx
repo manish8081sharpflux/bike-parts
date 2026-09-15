@@ -315,7 +315,7 @@ export default async function AdminOrderDetailPage({
                       href={order.returnShippingTrackingUrl}
                       target="_blank"
                       rel="noreferrer"
-                      className="text-xs font-bold text-[#ff4b1f]"
+                      className="text-xs font-bold text-[#025632]"
                     >
                       {order.returnShippingProvider === "BORZO" ? "Track Delivery" : "Track Shipment"} ↗
                     </a>
@@ -336,7 +336,7 @@ export default async function AdminOrderDetailPage({
                           name="returnCondition"
                           required
                           defaultValue=""
-                          className="h-10 w-full appearance-none rounded-lg border border-zinc-300 bg-white px-3 pr-9 text-sm font-semibold text-[#070e2b] outline-none transition focus:border-[#ff4b1f] focus:ring-2 focus:ring-[#ff4b1f]/15"
+                          className="h-10 w-full appearance-none rounded-lg border border-zinc-300 bg-white px-3 pr-9 text-sm font-semibold text-[#070e2b] outline-none transition focus:border-[#025632] focus:ring-2 focus:ring-[#025632]/15"
                         >
                           <option value="" disabled>
                             Choose condition…
@@ -538,7 +538,7 @@ export default async function AdminOrderDetailPage({
                   key={order.status}
                   name="status"
                   defaultValue={toCustomerVisibleStatus(order.status)}
-                  className="h-11 w-full appearance-none rounded-lg border border-zinc-300 bg-white px-3 pr-9 text-sm font-semibold text-[#070e2b] outline-none transition focus:border-[#ff4b1f] focus:ring-2 focus:ring-[#ff4b1f]/15"
+                  className="h-11 w-full appearance-none rounded-lg border border-zinc-300 bg-white px-3 pr-9 text-sm font-semibold text-[#070e2b] outline-none transition focus:border-[#025632] focus:ring-2 focus:ring-[#025632]/15"
                 >
                   {STATUS_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>
@@ -599,7 +599,7 @@ export default async function AdminOrderDetailPage({
                     href={order.shippingTrackingUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="text-xs font-bold text-[#ff4b1f]"
+                    className="text-xs font-bold text-[#025632]"
                   >
                     Track Shipment ↗
                   </a>

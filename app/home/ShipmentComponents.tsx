@@ -34,14 +34,14 @@ export function OrderStatusCard({ order }: { order: Order }) {
   return <section aria-label="Order status" className="min-w-0 rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
     <div className="flex flex-wrap items-start justify-between gap-3">
       <h2 className="max-w-md text-xl font-bold leading-tight text-[#070e2b] sm:text-2xl">{headline}</h2>
-      <span className={`rounded-full px-3 py-1 text-xs font-semibold ${order.status === "delivered" ? "bg-emerald-50 text-emerald-700" : order.status === "cancelled" ? "bg-red-50 text-red-700" : "bg-orange-50 text-orange-700"}`}>{label}</span>
+      <span className={`rounded-full px-3 py-1 text-xs font-semibold ${order.status === "delivered" ? "bg-emerald-50 text-emerald-700" : order.status === "cancelled" ? "bg-red-50 text-red-700" : "bg-[#ecfdf5] text-[#047857]"}`}>{label}</span>
     </div>
     {eta ? <p className="mt-2 text-sm font-semibold text-zinc-600">Expected {eta.startsWith("Today,") ? eta.replace("Today,", "today,") : eta}</p> : null}
     {order.status === "delivered" && deliveredAt !== null ? <p className="mt-2 text-sm text-emerald-700">Delivered on {formatTrackingDate(deliveredAt, true)}</p> : null}
     {order.status !== "cancelled" ? <ol aria-label="Delivery progress" className="mt-6 grid grid-cols-5">
       {steps.map((step, index) => <li key={step.label} aria-current={step.state === "active" ? "step" : undefined} data-state={step.state} className="relative min-w-0 text-center">
         {index < steps.length - 1 ? <span aria-hidden="true" className={`absolute left-1/2 right-[-50%] top-4 h-0.5 ${step.state === "completed" ? "bg-emerald-500" : "bg-zinc-200"}`} /> : null}
-        <span className={`relative mx-auto grid size-8 place-items-center rounded-full ${step.state === "completed" ? "bg-emerald-600 text-white" : step.state === "active" ? "bg-[#ff4b1f] text-white ring-4 ring-orange-50" : "bg-zinc-100 text-zinc-400"}`}>
+        <span className={`relative mx-auto grid size-8 place-items-center rounded-full ${step.state === "completed" ? "bg-emerald-600 text-white" : step.state === "active" ? "bg-[#025632] text-white ring-4 ring-[#ecfdf5]" : "bg-zinc-100 text-zinc-400"}`}>
           {step.state === "completed" ? <Check size={16} aria-hidden="true" /> : index >= 2 && index <= 3 ? <Truck size={15} aria-hidden="true" /> : <Package size={15} aria-hidden="true" />}
         </span>
         <span className="mt-2 block px-0.5 text-[10px] font-semibold leading-tight text-[#070e2b] sm:text-xs">{step.label}</span>
@@ -116,7 +116,7 @@ export function ShipmentTracking({ order }: { order: Order }) {
   const hasMapPoints = Boolean(pickup || drop || rider);
   const distanceKm = order.shippingDistanceMeters != null ? (order.shippingDistanceMeters / 1000).toFixed(1) : null;
   return <section aria-label="Shipment tracking" className="min-w-0 rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
-    <h3 className="flex items-center gap-2 text-base font-bold text-[#070e2b]"><Truck size={19} className="text-orange-600" aria-hidden="true" />{isBorzo ? "Live Delivery Tracking" : "Shipment Tracking"}</h3>
+    <h3 className="flex items-center gap-2 text-base font-bold text-[#070e2b]"><Truck size={19} className="text-[#059669]" aria-hidden="true" />{isBorzo ? "Live Delivery Tracking" : "Shipment Tracking"}</h3>
     {/* Only Shiprocket gets "Powered by" co-branding — Borzo and legacy Porter rows just state the provider plainly (Part 26: no Shiprocket branding on a Borzo delivery). */}
     {provider ? <p className="mt-1 text-xs text-zinc-500">{provider === "Shiprocket" ? "Powered by Shiprocket" : `Provider: ${provider}`}</p> : null}
     {/* A real map only from real Borzo-geocoded pickup/drop/rider coordinates — never derived from an address, pincode, or city center (Part 7). Pickup/drop appear as soon as the delivery is created; the rider marker joins once Borzo actually assigns one. */}
@@ -130,7 +130,7 @@ export function ShipmentTracking({ order }: { order: Order }) {
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-zinc-500">
             {pickup ? <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-zinc-500" aria-hidden="true" />Pickup</span> : null}
-            {drop ? <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-[#ff4b1f]" aria-hidden="true" />Drop</span> : null}
+            {drop ? <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-[#025632]" aria-hidden="true" />Drop</span> : null}
             {rider ? <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-emerald-500" aria-hidden="true" />Rider</span> : null}
             {distanceKm ? <span className="ml-auto font-semibold text-zinc-700">Distance: {distanceKm} km</span> : null}
           </div>
@@ -141,6 +141,6 @@ export function ShipmentTracking({ order }: { order: Order }) {
       )
     ) : null}
     <Rows rows={[["Courier Partner", order.shippingCourierName], ["AWB Number", order.shippingAwbCode], ["Current Status", shipmentStatus(order)], ["Last Update", lastTrackingUpdate(order)], ["Estimated Delivery", expectedDelivery(order)]]} />
-    {url ? <a href={url} target="_blank" rel="noreferrer" className="mt-5 flex w-full items-center justify-center gap-2 rounded-lg bg-[#ff4b1f] px-4 py-3 text-sm font-semibold text-white hover:bg-[#e83b11]">{isBorzo ? "Track Delivery" : "Track Shipment"}<ExternalLink size={15} aria-hidden="true" /></a> : <p className="mt-4 text-xs text-zinc-500">{order.shippingAwbCode ? "Use the AWB above when contacting the courier." : "Tracking details will appear when available."}</p>}
+    {url ? <a href={url} target="_blank" rel="noreferrer" className="mt-5 flex w-full items-center justify-center gap-2 rounded-lg bg-[#025632] px-4 py-3 text-sm font-semibold text-white hover:bg-[#013720]">{isBorzo ? "Track Delivery" : "Track Shipment"}<ExternalLink size={15} aria-hidden="true" /></a> : <p className="mt-4 text-xs text-zinc-500">{order.shippingAwbCode ? "Use the AWB above when contacting the courier." : "Tracking details will appear when available."}</p>}
   </section>;
 }

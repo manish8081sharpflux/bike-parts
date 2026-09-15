@@ -202,14 +202,14 @@ export function CartDrawer({
                         type="button"
                         aria-label={`Remove ${product.name} from cart`}
                         onClick={() => onRemove(product.name)}
-                        className="shrink-0 text-zinc-400 transition hover:text-[#ff4b1f]"
+                        className="shrink-0 text-zinc-400 transition hover:text-[#025632]"
                       >
                         <X className="size-4" />
                       </button>
                     </div>
 
                     <div className="mt-2 flex items-center justify-between gap-2">
-                      <div className="flex h-8 min-w-[92px] items-center justify-between gap-0.5 rounded-full bg-[#ff4b1f] p-1 shadow-sm shadow-orange-200">
+                      <div className="flex h-8 min-w-[92px] items-center justify-between gap-0.5 rounded-full bg-[#025632] p-1 shadow-sm shadow-[#a7f3d0]">
                         <button
                           type="button"
                           aria-label={`Decrease quantity of ${product.name}`}
@@ -286,7 +286,7 @@ export function CartDrawer({
               <button
                 type="button"
                 onClick={isAuthenticated ? onCheckout : onProceedToLogin}
-                className="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-[#ff4b1f] text-base font-bold text-white shadow-sm shadow-orange-200 transition hover:bg-[#e8330e]"
+                className="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-[#025632] text-base font-bold text-white shadow-sm shadow-[#a7f3d0] transition hover:bg-[#013720]"
               >
                 {isAuthenticated ? "Proceed to Checkout" : "Proceed to Login"}
                 <ArrowRight className="size-5" />
@@ -408,11 +408,11 @@ export function LoginModal({
         </button>
 
         <div className="flex flex-col items-center pt-1 text-center sm:pt-2">
-          <span className="grid size-10 place-items-center rounded-xl bg-[#ff4b1f] text-white shadow-sm sm:size-14">
+          <span className="grid size-10 place-items-center rounded-xl bg-[#025632] text-white shadow-sm sm:size-14">
             <Settings className="size-5 sm:size-8" />
           </span>
           <span className="mt-2 text-lg font-black leading-none sm:mt-3 sm:text-2xl">
-            Deep <span className="text-[#f01818]">Automobiles</span>
+            Deep <span className="text-[#025632]">Automobiles</span>
           </span>
           <span className="mt-1 text-[11px] font-medium text-zinc-500 sm:text-xs">
             Ride Better. Keep It Genuine.
@@ -428,7 +428,7 @@ export function LoginModal({
               Log in or Sign up to continue
             </p>
 
-            <div className="mt-3 flex h-11 items-center overflow-hidden rounded-lg border border-zinc-200 bg-white transition focus-within:border-[#ff4b1f] focus-within:ring-2 focus-within:ring-[#ff4b1f]/15 sm:mt-5 sm:h-12">
+            <div className="mt-3 flex h-11 items-center overflow-hidden rounded-lg border border-zinc-200 bg-white transition focus-within:border-[#025632] focus-within:ring-2 focus-within:ring-[#025632]/15 sm:mt-5 sm:h-12">
               <span className="flex h-full items-center border-r border-zinc-200 px-3 text-sm font-bold text-zinc-700">
                 +91
               </span>
@@ -454,7 +454,7 @@ export function LoginModal({
               type="button"
               onClick={() => void handleContinue()}
               disabled={!isPhoneValid || isSubmitting}
-              className="mt-3 flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#ff4b1f] text-sm font-bold text-white shadow-sm shadow-orange-200 transition hover:bg-[#e8330e] disabled:cursor-not-allowed disabled:opacity-40 sm:mt-4 sm:h-12 sm:text-base"
+              className="mt-3 flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#025632] text-sm font-bold text-white shadow-sm shadow-[#a7f3d0] transition hover:bg-[#013720] disabled:cursor-not-allowed disabled:opacity-40 sm:mt-4 sm:h-12 sm:text-base"
             >
               Continue
               <ArrowRight className="size-4 sm:size-5" />
@@ -482,7 +482,7 @@ export function LoginModal({
               <button
                 type="button"
                 onClick={() => setStep("phone")}
-                className="font-bold text-[#ff4b1f] hover:underline"
+                className="font-bold text-[#025632] hover:underline"
               >
                 Edit
               </button>
@@ -502,7 +502,7 @@ export function LoginModal({
                   maxLength={1}
                   aria-label={`OTP digit ${index + 1}`}
                   autoFocus={index === 0}
-                  className="h-11 w-9 rounded-lg border border-zinc-200 text-center text-base font-black text-zinc-950 outline-none transition focus:border-[#ff4b1f] focus:ring-2 focus:ring-[#ff4b1f]/15 sm:h-12 sm:w-11 sm:text-lg"
+                  className="h-11 w-9 rounded-lg border border-zinc-200 text-center text-base font-black text-zinc-950 outline-none transition focus:border-[#025632] focus:ring-2 focus:ring-[#025632]/15 sm:h-12 sm:w-11 sm:text-lg"
                 />
               ))}
             </div>
@@ -511,7 +511,7 @@ export function LoginModal({
               type="button"
               onClick={() => void handleVerify()}
               disabled={!isOtpComplete || isSubmitting}
-              className="mt-4 flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#ff4b1f] text-sm font-bold text-white shadow-sm shadow-orange-200 transition hover:bg-[#e8330e] disabled:cursor-not-allowed disabled:opacity-40 sm:mt-6 sm:h-12 sm:text-base"
+              className="mt-4 flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#025632] text-sm font-bold text-white shadow-sm shadow-[#a7f3d0] transition hover:bg-[#013720] disabled:cursor-not-allowed disabled:opacity-40 sm:mt-6 sm:h-12 sm:text-base"
             >
               Verify & Continue
               <ArrowRight className="size-4 sm:size-5" />
@@ -525,7 +525,7 @@ export function LoginModal({
                 <button
                   type="button"
                   onClick={() => void handleContinue()}
-                  className="font-bold text-[#ff4b1f] hover:underline"
+                  className="font-bold text-[#025632] hover:underline"
                 >
                   Resend OTP
                 </button>

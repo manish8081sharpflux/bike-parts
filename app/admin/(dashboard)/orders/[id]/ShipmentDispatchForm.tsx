@@ -87,7 +87,7 @@ export function ShipmentDispatchForm({
             <label
               key={courier.courierCompanyId}
               className={`flex cursor-pointer items-center justify-between gap-2 rounded-md px-2 py-1.5 text-xs transition ${
-                selected === courier.courierCompanyId ? "bg-[#fff0eb]" : "hover:bg-zinc-50"
+                selected === courier.courierCompanyId ? "bg-[#e9fef5]" : "hover:bg-zinc-50"
               }`}
             >
               <span className="flex items-center gap-2">
@@ -130,7 +130,7 @@ export function ShipmentDispatchForm({
       <button
         type="submit"
         disabled={loading || blockedByDimensions}
-        className="mt-1 flex h-10 w-full items-center justify-center gap-1.5 rounded-lg bg-[#ff4b1f] text-sm font-bold text-white transition hover:bg-[#e8330e] disabled:cursor-not-allowed disabled:opacity-40"
+        className="mt-1 flex h-10 w-full items-center justify-center gap-1.5 rounded-lg bg-[#025632] text-sm font-bold text-white transition hover:bg-[#013720] disabled:cursor-not-allowed disabled:opacity-40"
       >
         {submitLabel}
       </button>

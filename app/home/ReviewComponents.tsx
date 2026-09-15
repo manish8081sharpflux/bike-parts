@@ -48,7 +48,7 @@ export function PurchaseReviewEditor({ orderId, orderItemId, productName, review
     {review && !editing ? <div className="mt-2 space-y-2">
       <ReviewStars rating={review.rating} />
       {review.reviewText ? <p className="whitespace-pre-wrap break-words text-sm text-zinc-600">{review.reviewText}</p> : null}
-      <button type="button" onClick={() => { setRating(review.rating); setReviewText(review.reviewText ?? ""); setEditing(true); setSaved(false); }} className="block text-xs font-semibold text-orange-700 underline">Edit Review</button>
+      <button type="button" onClick={() => { setRating(review.rating); setReviewText(review.reviewText ?? ""); setEditing(true); setSaved(false); }} className="block text-xs font-semibold text-[#047857] underline">Edit Review</button>
     </div> : <form onSubmit={submit} className="mt-2 space-y-3">
       {/* `relative` keeps the sr-only legend's containing block scoped to this fieldset — see product-form.tsx's Section component for the page-scroll bug an unpositioned ancestor causes with an absolutely-positioned sr-only element. */}
       <fieldset disabled={saving} className="relative">
@@ -56,7 +56,7 @@ export function PurchaseReviewEditor({ orderId, orderItemId, productName, review
         <div className="flex gap-2">
           {[1, 2, 3, 4, 5].map((star) => <label key={star} className="relative cursor-pointer">
             <input className="peer absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0" type="radio" name={`rating-${id}`} value={star} required checked={rating === star} onChange={() => setRating(star)} aria-label={`${star} ${star === 1 ? "star" : "stars"}`} />
-            <Star aria-hidden="true" className={`size-8 rounded peer-focus-visible:outline-2 peer-focus-visible:outline-orange-500 ${star <= rating ? "fill-amber-400 text-amber-500" : "text-zinc-400"}`} />
+            <Star aria-hidden="true" className={`size-8 rounded peer-focus-visible:outline-2 peer-focus-visible:outline-[#10b981] ${star <= rating ? "fill-amber-400 text-amber-500" : "text-zinc-400"}`} />
           </label>)}
         </div>
       </fieldset>
@@ -64,7 +64,7 @@ export function PurchaseReviewEditor({ orderId, orderItemId, productName, review
       <textarea id={`${id}-text`} value={reviewText} onChange={(event) => setReviewText(event.target.value)} maxLength={2000} disabled={saving} rows={3} className="block w-full rounded-lg border border-zinc-300 bg-white p-2 text-sm" placeholder="How was the quality and fit?" />
       <p className="text-xs text-zinc-500">{reviewText.length}/2,000 characters</p>
       <div className="flex gap-3">
-        <button type="submit" disabled={saving || rating === 0} className="rounded-lg bg-[#ff4b1f] px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">{saving ? "Saving…" : review ? "Save review" : "Submit review"}</button>
+        <button type="submit" disabled={saving || rating === 0} className="rounded-lg bg-[#025632] px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">{saving ? "Saving…" : review ? "Save review" : "Submit review"}</button>
         {review ? <button type="button" disabled={saving} onClick={() => { setEditing(false); setError(null); }} className="text-xs font-semibold">Cancel</button> : null}
       </div>
     </form>}

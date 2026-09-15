@@ -223,9 +223,9 @@ export function BrandSelectionModal({
               type="button"
               key={brand.name}
               onClick={() => onSelect(brand.name)}
-              className={`group flex h-28 flex-col items-center justify-center gap-2 rounded-lg border bg-white p-2 text-center shadow-sm transition hover:-translate-y-0.5 hover:border-[#ff4b1f] hover:shadow-md sm:p-3 ${
+              className={`group flex h-28 flex-col items-center justify-center gap-2 rounded-lg border bg-white p-2 text-center shadow-sm transition hover:-translate-y-0.5 hover:border-[#025632] hover:shadow-md sm:p-3 ${
                 selectedBrand === brand.name
-                  ? "border-[#ff4b1f] ring-2 ring-[#ff4b1f]/15"
+                  ? "border-[#025632] ring-2 ring-[#025632]/15"
                   : "border-zinc-200"
               }`}
             >
@@ -377,9 +377,9 @@ export function ModelSelectionModal({
               type="button"
               key={model.name}
               onClick={() => onSelect(model.name)}
-              className={`group flex h-24 flex-col items-center justify-between rounded-lg border bg-white p-2 text-center shadow-sm transition hover:-translate-y-0.5 hover:border-[#ff4b1f] hover:shadow-md sm:h-28 ${
+              className={`group flex h-24 flex-col items-center justify-between rounded-lg border bg-white p-2 text-center shadow-sm transition hover:-translate-y-0.5 hover:border-[#025632] hover:shadow-md sm:h-28 ${
                 selectedModel === model.name
-                  ? "border-[#ff4b1f] ring-2 ring-[#ff4b1f]/15"
+                  ? "border-[#025632] ring-2 ring-[#025632]/15"
                   : "border-zinc-200"
               }`}
             >
@@ -468,7 +468,7 @@ export function BikePartsModal({
             <button
               type="button"
               onClick={onChangeBike}
-              className="hidden h-9 items-center gap-1.5 whitespace-nowrap rounded-lg border border-zinc-200 px-3 text-sm font-bold text-zinc-950 transition hover:border-[#ff4b1f] hover:text-[#ff4b1f] sm:inline-flex"
+              className="hidden h-9 items-center gap-1.5 whitespace-nowrap rounded-lg border border-zinc-200 px-3 text-sm font-bold text-zinc-950 transition hover:border-[#025632] hover:text-[#025632] sm:inline-flex"
             >
               {selectedBrand?.name} {selectedModel} {selectedYear}
               <ChevronDown className="size-4" />
@@ -528,7 +528,7 @@ export function BikePartsModal({
               type="button"
               key={hotspot.name}
               onClick={() => onSelectPart(hotspot.name)}
-              className="absolute -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-full border border-zinc-200 bg-white px-1.5 py-0.5 text-[8px] font-bold leading-tight text-zinc-950 shadow-md transition hover:border-[#ff4b1f] hover:text-[#ff4b1f] hover:shadow-lg sm:px-3 sm:py-1.5 sm:text-xs"
+              className="absolute -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-full border border-zinc-200 bg-white px-1.5 py-0.5 text-[8px] font-bold leading-tight text-zinc-950 shadow-md transition hover:border-[#025632] hover:text-[#025632] hover:shadow-lg sm:px-3 sm:py-1.5 sm:text-xs"
               style={{ left: `${hotspot.label.x}%`, top: `${hotspot.label.y}%` }}
             >
               {hotspot.name}
@@ -539,7 +539,7 @@ export function BikePartsModal({
         <button
           type="button"
           onClick={onChangeBike}
-          className="mt-4 inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-lg border border-zinc-200 px-3 text-sm font-bold text-zinc-950 transition hover:border-[#ff4b1f] hover:text-[#ff4b1f] sm:hidden"
+          className="mt-4 inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-lg border border-zinc-200 px-3 text-sm font-bold text-zinc-950 transition hover:border-[#025632] hover:text-[#025632] sm:hidden"
         >
           {selectedBrand?.name} {selectedModel} {selectedYear}
           <ChevronDown className="size-4" />

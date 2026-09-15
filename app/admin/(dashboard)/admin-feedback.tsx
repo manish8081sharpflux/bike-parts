@@ -20,7 +20,7 @@ export function AdminPopup({ kind, title, message, onClose, onConfirm }: {
     <h2 id={`${id}-title`} className="text-xl font-bold">{title}</h2>
     <p id={`${id}-message`} className="mt-2 break-words text-sm leading-6 text-zinc-500">{message}</p>
     <div className="mt-6 flex gap-3">
-      <button autoFocus type="button" onClick={onClose} className={`flex-1 rounded-xl px-4 py-3 text-sm font-semibold ${onConfirm ? "border border-zinc-200 text-zinc-700" : "bg-[#ff4b1f] text-white"}`}>{onConfirm ? "Cancel" : "OK"}</button>
+      <button autoFocus type="button" onClick={onClose} className={`flex-1 rounded-xl px-4 py-3 text-sm font-semibold ${onConfirm ? "border border-zinc-200 text-zinc-700" : "bg-[#025632] text-white"}`}>{onConfirm ? "Cancel" : "OK"}</button>
       {onConfirm ? <button type="button" onClick={onConfirm} className="flex-1 rounded-xl bg-red-600 px-4 py-3 text-sm font-semibold text-white hover:bg-red-700">Yes, delete</button> : null}
     </div>
   </dialog>;

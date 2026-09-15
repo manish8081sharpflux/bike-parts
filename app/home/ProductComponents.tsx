@@ -53,7 +53,7 @@ export function ProductCard({
           }
         }}
         className={`group cursor-pointer rounded-lg outline-none transition ${
-          isSelected ? "ring-2 ring-[#ff4b1f]" : "focus-visible:ring-2 focus-visible:ring-[#ff4b1f]"
+          isSelected ? "ring-2 ring-[#025632]" : "focus-visible:ring-2 focus-visible:ring-[#025632]"
         }`}
       >
         <div className="relative aspect-[1.55] overflow-hidden rounded-xl bg-zinc-100 shadow-[0_12px_32px_rgba(15,23,42,0.08)] sm:rounded-[18px]">
@@ -78,7 +78,7 @@ export function ProductCard({
 
             {quantity > 0 ? (
               <div
-                className="flex h-6 shrink-0 items-center justify-between gap-0.5 rounded-full bg-[#ff4b1f] px-1 shadow-sm shadow-orange-200 sm:h-8 sm:gap-1"
+                className="flex h-6 shrink-0 items-center justify-between gap-0.5 rounded-full bg-[#025632] px-1 shadow-sm shadow-[#a7f3d0] sm:h-8 sm:gap-1"
                 onClick={(event) => event.stopPropagation()}
               >
                 <button
@@ -108,7 +108,7 @@ export function ProductCard({
                   event.stopPropagation();
                   onAddToCart();
                 }}
-                className="inline-flex h-6 shrink-0 items-center justify-center rounded-full bg-[#ff4b1f] px-2 text-[9px] font-black text-white shadow-sm shadow-orange-200 transition hover:bg-[#e8330e] active:scale-95 sm:h-8 sm:px-4 sm:text-[11px]"
+                className="inline-flex h-6 shrink-0 items-center justify-center rounded-full bg-[#025632] px-2 text-[9px] font-black text-white shadow-sm shadow-[#a7f3d0] transition hover:bg-[#013720] active:scale-95 sm:h-8 sm:px-4 sm:text-[11px]"
               >
                 Add
               </button>
@@ -160,7 +160,7 @@ export function ProductCard({
         compact ? "min-h-[148px] p-2" : "min-h-[178px] p-2.5"
       } cursor-pointer flex-col justify-between rounded-lg bg-white shadow-[0_10px_26px_rgba(15,23,42,0.07)] outline-none ring-1 transition ${
         isSelected
-          ? "ring-[#ff4b1f]"
+          ? "ring-[#025632]"
           : "ring-zinc-100 hover:ring-[#ffb9a4]"
       }`}
     >
@@ -201,7 +201,7 @@ export function ProductCard({
 
           {quantity > 0 ? (
             <div
-              className={`flex shrink-0 items-center justify-between rounded-full bg-[#ff4b1f] shadow-sm shadow-orange-200 ${
+              className={`flex shrink-0 items-center justify-between rounded-full bg-[#025632] shadow-sm shadow-[#a7f3d0] ${
                 compact ? "h-5 gap-0.5 px-0.5" : "h-7 gap-0.5 px-0.5"
               }`}
               onClick={(event) => event.stopPropagation()}
@@ -241,7 +241,7 @@ export function ProductCard({
                 event.stopPropagation();
                 onAddToCart();
               }}
-              className={`inline-flex shrink-0 items-center justify-center rounded-full bg-[#ff4b1f] font-bold text-white shadow-sm shadow-orange-200 transition hover:bg-[#e8330e] active:scale-95 ${
+              className={`inline-flex shrink-0 items-center justify-center rounded-full bg-[#025632] font-bold text-white shadow-sm shadow-[#a7f3d0] transition hover:bg-[#013720] active:scale-95 ${
                 compact ? "h-5 px-1.5 text-[9px]" : "h-7 px-2.5 text-[11px]"
               }`}
             >
@@ -349,7 +349,7 @@ export function ProductDetailDrawer({
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex h-7 items-center gap-2 text-xs font-medium text-[#53607e] transition hover:text-[#ff4b1f] sm:h-8 sm:text-sm"
+            className="inline-flex h-7 items-center gap-2 text-xs font-medium text-[#53607e] transition hover:text-[#025632] sm:h-8 sm:text-sm"
           >
             <ArrowRight className="size-4 rotate-180" />
             Back to {activeCategory || "All Parts"}
@@ -376,7 +376,7 @@ export function ProductDetailDrawer({
 
               {isZooming ? (
                 <span
-                  className="pointer-events-none absolute border-2 border-[#ff4b1f] bg-[#ff4b1f]/10"
+                  className="pointer-events-none absolute border-2 border-[#025632] bg-[#025632]/10"
                   style={{
                     left: `${lensLeft}%`,
                     top: `${lensTop}%`,
@@ -477,7 +477,7 @@ export function ProductDetailDrawer({
               </div>
 
               {cartQuantity > 0 ? (
-                <div className="flex h-10 min-w-[116px] items-center justify-between gap-1 rounded-full bg-[#ff4b1f] p-1.5 shadow-md shadow-orange-200 sm:h-12 sm:min-w-[136px]">
+                <div className="flex h-10 min-w-[116px] items-center justify-between gap-1 rounded-full bg-[#025632] p-1.5 shadow-md shadow-[#a7f3d0] sm:h-12 sm:min-w-[136px]">
                   <button
                     type="button"
                     aria-label="Decrease quantity"
@@ -502,7 +502,7 @@ export function ProductDetailDrawer({
                 <button
                   type="button"
                   onClick={() => onAddToCart(product, 1)}
-                  className="inline-flex h-10 min-w-[116px] items-center justify-center gap-2 rounded-full bg-[#ff4b1f] px-5 text-xs font-black text-white shadow-md shadow-orange-200 transition hover:bg-[#e8330e] active:scale-95 sm:h-12 sm:min-w-[136px] sm:px-6 sm:text-sm"
+                  className="inline-flex h-10 min-w-[116px] items-center justify-center gap-2 rounded-full bg-[#025632] px-5 text-xs font-black text-white shadow-md shadow-[#a7f3d0] transition hover:bg-[#013720] active:scale-95 sm:h-12 sm:min-w-[136px] sm:px-6 sm:text-sm"
                 >
                   <ShoppingCart className="size-4 sm:size-4.5" />
                   Add
@@ -522,7 +522,7 @@ export function ProductDetailDrawer({
                       aria-label={`Show photo ${index + 1} of ${product.name}`}
                       className={`grid size-16 shrink-0 place-items-center overflow-hidden rounded-lg bg-[#fbfbfa] ring-2 transition sm:size-20 ${
                         activeImage === url
-                          ? "ring-[#ff4b1f]"
+                          ? "ring-[#025632]"
                           : "ring-zinc-100 hover:ring-zinc-300"
                       }`}
                     >
@@ -557,7 +557,7 @@ export function ProductDetailDrawer({
                       className={`flex min-h-14 min-w-0 cursor-pointer flex-col items-center justify-center gap-1.5 rounded-xl border px-1.5 py-3 text-center leading-snug transition-colors sm:flex-row sm:gap-2 sm:px-3 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#c73510] ${
                         activeTab === tab.id
                           ? "border-[#c73510] bg-[#c73510] text-white shadow-sm"
-                          : "border-zinc-300 bg-white text-[#394563] shadow-sm hover:border-[#c73510] hover:bg-orange-50 hover:text-[#a82d0d]"
+                          : "border-zinc-300 bg-white text-[#394563] shadow-sm hover:border-[#c73510] hover:bg-[#ecfdf5] hover:text-[#a82d0d]"
                       }`}
                     >
                       <tab.icon className="size-4 shrink-0" aria-hidden="true" />
@@ -601,7 +601,7 @@ export function ProductDetailDrawer({
                       </h4>
                       <ul className="mt-3 grid gap-2 text-xs leading-5 text-[#394563] sm:grid-cols-2">
                         {product.features.map((feature, index) => (
-                          <li key={index} className="flex items-start gap-2 rounded-lg bg-zinc-50 px-3 py-2"><CheckCircle2 className="mt-0.5 size-4 shrink-0 text-[#ff4b1f]" /><span>{feature}</span></li>
+                          <li key={index} className="flex items-start gap-2 rounded-lg bg-zinc-50 px-3 py-2"><CheckCircle2 className="mt-0.5 size-4 shrink-0 text-[#025632]" /><span>{feature}</span></li>
                         ))}
                       </ul>
                     </div>
@@ -669,7 +669,7 @@ export function ProductDetailDrawer({
                           <div
                             key={index}
                             className={`flex flex-col items-center gap-2 rounded-lg border p-3 text-center ${
-                              isCurrent ? "border-[#ff4b1f] bg-[#fff8f5]" : "border-zinc-200"
+                              isCurrent ? "border-[#025632] bg-[#e9fef5]" : "border-zinc-200"
                             }`}
                           >
                             <span className="relative h-14 w-full">
@@ -711,7 +711,7 @@ export function ProductDetailDrawer({
                             key={model.name}
                             className={`flex flex-col items-center gap-2 rounded-lg border p-3 text-center ${
                               isCurrent
-                                ? "border-[#ff4b1f] bg-[#fff8f5]"
+                                ? "border-[#025632] bg-[#e9fef5]"
                                 : "border-zinc-200"
                             }`}
                           >

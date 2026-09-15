@@ -1349,7 +1349,7 @@ export function HomeClient({ products }: { products: Product[] }) {
           // always correct here.
           contact: authPhone ? `+91${authPhone}` : undefined,
         },
-        theme: { color: "#ff4b1f" },
+        theme: { color: "#025632" },
         handler: (paymentResponse) => {
           void (async () => {
             try {
@@ -1706,7 +1706,7 @@ export function HomeClient({ products }: { products: Product[] }) {
 
       <div className="fixed inset-x-3 bottom-4 z-50 overflow-hidden rounded-2xl bg-white shadow-[0_14px_34px_rgba(24,24,27,0.22)] ring-1 ring-zinc-200 animate-in fade-in slide-in-from-bottom-2 duration-200">
         <div className="flex items-center gap-3 border-b border-zinc-100 px-4 py-3">
-          <span className="grid size-10 shrink-0 place-items-center rounded-full bg-[#fff0eb] text-[#ff4b1f]">
+          <span className="grid size-10 shrink-0 place-items-center rounded-full bg-[#e9fef5] text-[#025632]">
             <User className="size-5" />
           </span>
           <span className="min-w-0">
@@ -1748,7 +1748,7 @@ export function HomeClient({ products }: { products: Product[] }) {
               <button
                 type="button"
                 onClick={handleLogout}
-                className="flex h-10 w-full items-center gap-3 rounded-lg px-3 text-left text-sm font-bold text-[#ff4b1f] transition hover:bg-[#fff0eb]"
+                className="flex h-10 w-full items-center gap-3 rounded-lg px-3 text-left text-sm font-bold text-[#025632] transition hover:bg-[#e9fef5]"
               >
                 <LogOut className="size-4.5" />
                 Logout
@@ -1780,20 +1780,15 @@ export function HomeClient({ products }: { products: Product[] }) {
             type="button"
             onClick={handleGoHome}
             aria-label="Go home"
-            className="flex min-w-0 items-center gap-2 text-left"
+            className="flex min-w-0 items-center text-left"
           >
-            <span className="grid size-9 shrink-0 place-items-center rounded-full bg-zinc-100 ring-1 ring-zinc-200">
-              <Image
-                src="/tyre-icon.png"
-                alt=""
-                width={34}
-                height={34}
-                className="size-8 object-contain"
-              />
-            </span>
-            <span className="truncate text-base font-black text-zinc-950 xl:text-lg">
-              Deep <span className="text-[#f01818]">Automobiles</span>
-            </span>
+            <Image
+              src="/deep-logo-trimmed.png"
+              alt="Deep Automobiles"
+              width={1500}
+              height={837}
+              className="h-12 w-auto shrink-0 object-contain"
+            />
           </button>
 
           <div className="relative mx-auto w-full max-w-[520px]">
@@ -1806,7 +1801,7 @@ export function HomeClient({ products }: { products: Product[] }) {
                   addRecentSearch(searchQuery);
                 }
               }}
-              className="flex h-10 w-full min-w-0 items-center overflow-hidden rounded-full border border-zinc-300 bg-white shadow-sm focus-within:border-zinc-500 focus-within:ring-2 focus-within:ring-zinc-200"
+              className="flex h-10 w-full min-w-0 items-center overflow-hidden rounded-full border-2 border-[#025632] bg-white shadow-sm focus-within:border-[#013720] focus-within:ring-2 focus-within:ring-[#025632]/20"
             >
               <Search className="ml-4 size-4.5 shrink-0 text-zinc-950" />
               <div className="relative min-w-0 flex-1">
@@ -2048,7 +2043,7 @@ export function HomeClient({ products }: { products: Product[] }) {
                               handleBrowseCategory(category);
                               setOpenCategoryDropdown(null);
                             }}
-                            className="flex w-full items-center justify-center gap-1 border-t border-zinc-100 px-4 py-2.5 text-xs font-black text-[#ff4b1f] transition hover:bg-[#fff3ef]"
+                            className="flex w-full items-center justify-center gap-1 border-t border-zinc-100 px-4 py-2.5 text-xs font-black text-[#025632] transition hover:bg-[#e9fef5]"
                           >
                             View all in {category}
                             <ArrowRight className="size-3.5" />
@@ -2075,7 +2070,7 @@ export function HomeClient({ products }: { products: Product[] }) {
       >
         <form
           onSubmit={(event) => event.preventDefault()}
-          className="flex h-12 min-w-0 flex-1 overflow-hidden rounded-full border border-zinc-200 bg-white shadow-[0_10px_30px_rgba(24,24,27,0.18)] focus-within:border-zinc-500"
+          className="flex h-12 min-w-0 flex-1 overflow-hidden rounded-full border-2 border-[#025632] bg-white shadow-[0_10px_30px_rgba(24,24,27,0.18)] focus-within:border-[#013720]"
         >
           <div className="relative min-w-0 flex-1">
             <button
@@ -2224,7 +2219,7 @@ export function HomeClient({ products }: { products: Product[] }) {
               <div className="rounded-lg bg-white p-5 text-zinc-950 shadow-[0_24px_70px_rgba(2,6,23,0.28)] ring-1 ring-white/70 sm:p-6">
                 <h1 className="text-3xl font-black leading-[1.02] text-zinc-950 sm:text-4xl">
                   Find the Right{" "}
-                  <span className="block text-[#f01818]">Bike Parts</span>
+                  <span className="block text-[#025632]">Bike Parts</span>
                 </h1>
                 <p className="mt-3 max-w-sm text-sm font-medium leading-6 text-zinc-600 sm:text-base">
                   Select your bike brand and model to find compatible genuine parts
@@ -2234,7 +2229,7 @@ export function HomeClient({ products }: { products: Product[] }) {
                   <button
                     type="button"
                     onClick={handleHeroSearch}
-                    className="flex h-12 w-full items-center justify-center rounded-lg bg-[#f01818] text-xl font-black text-white shadow-[0_18px_34px_rgba(240,24,24,0.3)] transition hover:bg-[#d91515]"
+                    className="flex h-12 w-full items-center justify-center rounded-lg bg-[#025632] text-xl font-black text-white shadow-[0_18px_34px_rgba(2, 86, 50,0.3)] transition hover:bg-[#013720]"
                   >
                     Select Bike
                   </button>
@@ -2260,14 +2255,14 @@ export function HomeClient({ products }: { products: Product[] }) {
               </div>
 
               <div className="max-w-lg justify-self-start text-white lg:ml-3">
-                <span className="inline-flex rounded-full bg-[#f01818] px-3.5 py-1.5 text-xs font-black uppercase leading-none text-white">
+                <span className="inline-flex rounded-full bg-[#025632] px-3.5 py-1.5 text-xs font-black uppercase leading-none text-white">
                   Genuine Parts
                 </span>
                 <p className="mt-3 max-w-lg text-4xl font-black uppercase italic leading-[0.98] sm:text-5xl lg:text-6xl">
                   Keep Your Ride{" "}
-                  <span className="block text-[#f01818]">On The Road</span>
+                  <span className="block text-[#025632]">On The Road</span>
                 </p>
-                <span className="mt-4 block h-0.5 w-12 bg-[#f01818]" />
+                <span className="mt-4 block h-0.5 w-12 bg-[#025632]" />
                 <p className="mt-4 text-base font-medium leading-7 text-white/95 sm:text-lg">
                   Quality Parts. Better Performance.
                   <span className="block">For Every Ride.</span>
@@ -2290,7 +2285,7 @@ export function HomeClient({ products }: { products: Product[] }) {
           <div className="mx-auto w-full max-w-[1600px] px-4 sm:px-6 lg:px-14">
             <div className="text-center">
               <h2 className="text-3xl font-black text-white sm:text-4xl">
-                Choose Your <span className="text-[#ff4b1f]">Bike Brand</span>
+                Choose Your <span className="text-[#025632]">Bike Brand</span>
               </h2>
               <p className="mt-2 text-sm text-zinc-400 sm:text-base">
                 To find compatible parts
@@ -2375,7 +2370,7 @@ export function HomeClient({ products }: { products: Product[] }) {
                   onClick={() => goToBrandSlide(index)}
                   aria-label={`Go to ${brand.name}`}
                   className={`h-1.5 rounded-full transition-all ${
-                    index === activeBrandSlide ? "w-6 bg-[#ff4b1f]" : "w-1.5 bg-white/25 hover:bg-white/40"
+                    index === activeBrandSlide ? "w-6 bg-[#025632]" : "w-1.5 bg-white/25 hover:bg-white/40"
                   }`}
                 />
               ))}
@@ -2421,7 +2416,7 @@ export function HomeClient({ products }: { products: Product[] }) {
               className="group flex min-h-[140px] flex-col justify-between rounded-lg border border-zinc-200 bg-white p-2 text-center shadow-sm transition-all duration-200 hover:-translate-y-1 hover:shadow-md"
             >
               <div className="relative grid h-16 place-items-center">
-                <span className="absolute grid size-6 -translate-x-8 -translate-y-3 place-items-center rounded-full bg-[#fff0eb]">
+                <span className="absolute grid size-6 -translate-x-8 -translate-y-3 place-items-center rounded-full bg-[#e9fef5]">
                   <Search className="size-3" />
                 </span>
 
@@ -2569,25 +2564,28 @@ export function HomeClient({ products }: { products: Product[] }) {
               <button
                 type="button"
                 onClick={handleGoHome}
-                className="flex items-center gap-2 text-left"
+                className="flex items-center text-left"
               >
-                <span className="grid size-10 shrink-0 place-items-center rounded-full bg-white ring-1 ring-zinc-200">
-                  <Image
-                    src="/tyre-icon.png"
-                    alt=""
-                    width={28}
-                    height={28}
-                    className="size-6 object-contain"
-                  />
-                </span>
-                <span className="text-xl font-black text-zinc-950">
-                  <span className="text-[#f01818]">Deep </span>Automobiles
-                </span>
+                <Image
+                  src="/deep-logo-trimmed.png"
+                  alt="Deep Automobiles"
+                  width={1500}
+                  height={837}
+                  className="h-14 w-auto object-contain"
+                />
               </button>
 
               <p className="mt-5 text-xs text-zinc-500">
                 &copy; 2026 Deep Automobiles Ltd.
               </p>
+              <a
+                href="https://www.sharpflux.com/"
+                target="_blank"
+                rel="noreferrer"
+                className="mt-1 block text-xs text-zinc-500 transition hover:text-[#025632]"
+              >
+                Developed by SharpFlux Technologies
+              </a>
             </div>
 
             {/* Company */}

@@ -44,9 +44,9 @@ export function AddressMapPicker({
             className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-white px-3 text-xs font-bold text-[#070e2b] shadow-md transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-70"
           >
             {isLocating ? (
-              <Loader2 className="size-4 animate-spin text-[#ff4b1f]" />
+              <Loader2 className="size-4 animate-spin text-[#025632]" />
             ) : (
-              <Navigation className="size-4 text-[#ff4b1f]" />
+              <Navigation className="size-4 text-[#025632]" />
             )}
             {isLocating ? "Detecting your location..." : "Go to current location"}
           </button>
@@ -54,7 +54,7 @@ export function AddressMapPicker({
       </div>
 
       <div className="flex items-center gap-2 border-t border-zinc-200 bg-white px-4 py-3">
-        <MapPin className="size-4 shrink-0 text-[#ff4b1f]" />
+        <MapPin className="size-4 shrink-0 text-[#025632]" />
         <span className="min-w-0">
           <span className="block text-[10px] font-medium text-zinc-500">
             Delivering your order to
@@ -232,7 +232,7 @@ export function AddressFormModal({
                       onClick={() => setLabel(option.label)}
                       className={`inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-sm font-bold transition ${
                         isActive
-                          ? "border-[#ff4b1f] bg-[#fff0eb] text-[#ff4b1f]"
+                          ? "border-[#025632] bg-[#e9fef5] text-[#025632]"
                           : "border-zinc-200 text-zinc-600 hover:border-zinc-300"
                       }`}
                     >
@@ -252,7 +252,7 @@ export function AddressFormModal({
                 value={flatNo}
                 onChange={(event) => setFlatNo(event.target.value)}
                 placeholder="e.g. H.No. 102 or Shop No. 5"
-                className="h-11 w-full rounded-lg border border-zinc-200 px-3 text-sm outline-none transition focus:border-[#ff4b1f] focus:ring-2 focus:ring-[#ff4b1f]/15"
+                className="h-11 w-full rounded-lg border border-zinc-200 px-3 text-sm outline-none transition focus:border-[#025632] focus:ring-2 focus:ring-[#025632]/15"
               />
             </label>
 
@@ -264,7 +264,7 @@ export function AddressFormModal({
                 value={floor}
                 onChange={(event) => setFloor(event.target.value)}
                 placeholder="e.g. 3rd Floor"
-                className="h-11 w-full rounded-lg border border-zinc-200 px-3 text-sm outline-none transition focus:border-[#ff4b1f] focus:ring-2 focus:ring-[#ff4b1f]/15"
+                className="h-11 w-full rounded-lg border border-zinc-200 px-3 text-sm outline-none transition focus:border-[#025632] focus:ring-2 focus:ring-[#025632]/15"
               />
             </label>
 
@@ -276,7 +276,7 @@ export function AddressFormModal({
                 value={area}
                 onChange={(event) => setArea(event.target.value)}
                 placeholder="e.g. Boring Road, Patna"
-                className="h-11 w-full rounded-lg border border-zinc-200 px-3 text-sm outline-none transition focus:border-[#ff4b1f] focus:ring-2 focus:ring-[#ff4b1f]/15"
+                className="h-11 w-full rounded-lg border border-zinc-200 px-3 text-sm outline-none transition focus:border-[#025632] focus:ring-2 focus:ring-[#025632]/15"
               />
             </label>
 
@@ -289,7 +289,7 @@ export function AddressFormModal({
                   value={city}
                   onChange={(event) => setCity(event.target.value)}
                   placeholder="City"
-                  className="h-11 w-full rounded-lg border border-zinc-200 px-3 text-sm outline-none transition focus:border-[#ff4b1f] focus:ring-2 focus:ring-[#ff4b1f]/15"
+                  className="h-11 w-full rounded-lg border border-zinc-200 px-3 text-sm outline-none transition focus:border-[#025632] focus:ring-2 focus:ring-[#025632]/15"
                 />
               </label>
               <label className="block">
@@ -303,7 +303,7 @@ export function AddressFormModal({
                   }
                   inputMode="numeric"
                   placeholder="800001"
-                  className="h-11 w-full rounded-lg border border-zinc-200 px-3 text-sm outline-none transition focus:border-[#ff4b1f] focus:ring-2 focus:ring-[#ff4b1f]/15"
+                  className="h-11 w-full rounded-lg border border-zinc-200 px-3 text-sm outline-none transition focus:border-[#025632] focus:ring-2 focus:ring-[#025632]/15"
                 />
               </label>
             </div>
@@ -316,7 +316,7 @@ export function AddressFormModal({
                 value={landmark}
                 onChange={(event) => setLandmark(event.target.value)}
                 placeholder="e.g. Near Patna Junction"
-                className="h-11 w-full rounded-lg border border-zinc-200 px-3 text-sm outline-none transition focus:border-[#ff4b1f] focus:ring-2 focus:ring-[#ff4b1f]/15"
+                className="h-11 w-full rounded-lg border border-zinc-200 px-3 text-sm outline-none transition focus:border-[#025632] focus:ring-2 focus:ring-[#025632]/15"
               />
             </label>
 
@@ -332,7 +332,7 @@ export function AddressFormModal({
                 value={contactName}
                 onChange={(event) => setContactName(event.target.value)}
                 placeholder="Full name"
-                className="h-11 w-full rounded-lg border border-zinc-200 px-3 text-sm outline-none transition focus:border-[#ff4b1f] focus:ring-2 focus:ring-[#ff4b1f]/15"
+                className="h-11 w-full rounded-lg border border-zinc-200 px-3 text-sm outline-none transition focus:border-[#025632] focus:ring-2 focus:ring-[#025632]/15"
               />
             </label>
 
@@ -345,7 +345,7 @@ export function AddressFormModal({
                 onChange={(event) => setPhone(event.target.value.replace(/\D/g, "").slice(0, 10))}
                 inputMode="numeric"
                 placeholder="10-digit mobile number"
-                className="h-11 w-full rounded-lg border border-zinc-200 px-3 text-sm outline-none transition focus:border-[#ff4b1f] focus:ring-2 focus:ring-[#ff4b1f]/15"
+                className="h-11 w-full rounded-lg border border-zinc-200 px-3 text-sm outline-none transition focus:border-[#025632] focus:ring-2 focus:ring-[#025632]/15"
               />
             </label>
 
@@ -359,7 +359,7 @@ export function AddressFormModal({
               type="button"
               onClick={handleSave}
               disabled={!isValid || isSaving}
-              className="flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-[#ff4b1f] text-base font-bold text-white shadow-sm shadow-orange-200 transition hover:bg-[#e8330e] disabled:cursor-not-allowed disabled:opacity-40"
+              className="flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-[#025632] text-base font-bold text-white shadow-sm shadow-[#a7f3d0] transition hover:bg-[#013720] disabled:cursor-not-allowed disabled:opacity-40"
             >
               {isSaving ? <Loader2 className="size-4 animate-spin" /> : null}
               Save Address
@@ -448,7 +448,7 @@ export function AddressPanel({
           <button
             type="button"
             onClick={onAddNew}
-            className="flex w-full items-center justify-center gap-2 rounded-lg border border-zinc-200 bg-white py-3 text-sm font-bold text-[#ff4b1f] transition hover:bg-[#fff0eb]"
+            className="flex w-full items-center justify-center gap-2 rounded-lg border border-zinc-200 bg-white py-3 text-sm font-bold text-[#025632] transition hover:bg-[#e9fef5]"
           >
             <Plus className="size-4" />
             Add a new address
@@ -479,12 +479,12 @@ export function AddressPanel({
                   }}
                   className={`relative block w-full cursor-pointer rounded-xl bg-white p-3 text-left outline-none transition ${
                     isSelected
-                      ? "shadow-[0_8px_24px_rgba(255,75,31,0.18)] ring-2 ring-[#ff4b1f]"
+                      ? "shadow-[0_8px_24px_rgba(2, 86, 50,0.18)] ring-2 ring-[#025632]"
                       : "shadow-[0_6px_18px_rgba(15,23,42,0.06)] ring-1 ring-transparent hover:shadow-[0_10px_24px_rgba(15,23,42,0.09)]"
                   }`}
                 >
                   {isSelected ? (
-                    <span className="absolute right-3 top-3 grid size-5 place-items-center rounded-full bg-[#ff4b1f] text-white">
+                    <span className="absolute right-3 top-3 grid size-5 place-items-center rounded-full bg-[#025632] text-white">
                       <CheckCircle2 className="size-3.5" />
                     </span>
                   ) : null}
@@ -519,7 +519,7 @@ export function AddressPanel({
                             event.stopPropagation();
                             onEdit(address.id);
                           }}
-                          className="inline-flex items-center gap-1 rounded-full bg-zinc-50 px-2 py-0.5 text-[11px] font-bold text-zinc-500 transition hover:bg-[#fff0eb] hover:text-[#ff4b1f]"
+                          className="inline-flex items-center gap-1 rounded-full bg-zinc-50 px-2 py-0.5 text-[11px] font-bold text-zinc-500 transition hover:bg-[#e9fef5] hover:text-[#025632]"
                         >
                           <Pencil className="size-3" />
                           Edit

@@ -15,7 +15,7 @@ export default async function AdminLoginPage({
     <main className="flex min-h-screen items-center justify-center bg-[#fbfbfa] px-4">
       <div className="w-full max-w-sm rounded-xl bg-white p-6 shadow-[0_10px_30px_rgba(15,23,42,0.08)] ring-1 ring-zinc-100">
         <h1 className="text-xl font-black text-[#070e2b]">
-          Deep <span className="text-[#f01818]">Automobiles</span> Admin
+          Deep <span className="text-[#025632]">Automobiles</span> Admin
         </h1>
         <p className="mt-1 text-sm text-zinc-500">Sign in to manage orders and products.</p>
 

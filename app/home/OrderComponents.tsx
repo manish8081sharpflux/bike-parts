@@ -35,13 +35,13 @@ export function OrderMiniTracker({ order }: { order: Order }) {
             <div className="flex w-full items-center">
               <span
                 className={`grid size-6 shrink-0 place-items-center rounded-full text-white ${
-                  done || isCurrent ? "bg-[#ff4b1f]" : "bg-zinc-200 text-zinc-400"
+                  done || isCurrent ? "bg-[#025632]" : "bg-zinc-200 text-zinc-400"
                 }`}
               >
                 {done ? <CheckCircle2 className="size-3.5" /> : <StepIcon className="size-3" />}
               </span>
               {index < orderTrackingSteps.length - 1 ? (
-                <span className={`mx-0.5 h-0.5 flex-1 rounded-full ${done ? "bg-[#ff4b1f]" : "bg-zinc-200"}`} />
+                <span className={`mx-0.5 h-0.5 flex-1 rounded-full ${done ? "bg-[#025632]" : "bg-zinc-200"}`} />
               ) : null}
             </div>
             <span className={`mt-1 text-[9px] font-bold leading-tight ${done || isCurrent ? "text-[#070e2b]" : "text-zinc-400"}`}>
@@ -169,7 +169,7 @@ export function OrderListRow({
             <button
               type="button"
               onClick={onReorder}
-              className="inline-flex items-center gap-1.5 rounded-full border border-[#ff4b1f] px-3 py-1.5 text-xs font-bold text-[#ff4b1f] transition hover:bg-[#fff0eb]"
+              className="inline-flex items-center gap-1.5 rounded-full border border-[#025632] px-3 py-1.5 text-xs font-bold text-[#025632] transition hover:bg-[#e9fef5]"
             >
               <RotateCw className="size-3.5" />
               Reorder
@@ -228,7 +228,7 @@ export function OrdersListPage({
                 }}
                 className={`inline-flex h-9 flex-auto items-center justify-center gap-2 rounded-xl border px-3 text-xs font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#c73510] ${
                   activeFilter === filter.key
-                    ? "border-[#ff4b1f] bg-[#fff0eb] text-[#ff4b1f]"
+                    ? "border-[#025632] bg-[#e9fef5] text-[#025632]"
                     : "border-zinc-200 bg-white text-zinc-700 hover:border-zinc-300"
                 }`}
               >
@@ -358,7 +358,7 @@ export function OrderDetailView({
       <button
         type="button"
         onClick={onBack}
-        className="mb-4 flex items-center gap-2 text-sm font-bold text-[#53607e] transition hover:text-[#ff4b1f]"
+        className="mb-4 flex items-center gap-2 text-sm font-bold text-[#53607e] transition hover:text-[#025632]"
       >
         <ArrowRight className="size-4 rotate-180" />
         My Orders
@@ -480,7 +480,7 @@ export function OrderDetailView({
                             // with returnRequestError now visible.
                             onRequestReturn(returnReasonDraft.trim());
                           }}
-                          className="flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg bg-[#ff4b1f] text-xs font-black text-white transition hover:bg-[#e8330e] disabled:cursor-not-allowed disabled:opacity-40"
+                          className="flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg bg-[#025632] text-xs font-black text-white transition hover:bg-[#013720] disabled:cursor-not-allowed disabled:opacity-40"
                         >
                           {isRequestingReturn ? <Loader2 className="size-3.5 animate-spin" /> : null}
                           Submit request
@@ -634,7 +634,7 @@ export function OrderDetailView({
                             setPartialReturnQuantities({});
                           }
                         }}
-                        className="flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg bg-[#ff4b1f] text-xs font-black text-white transition hover:bg-[#e8330e] disabled:cursor-not-allowed disabled:opacity-40"
+                        className="flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg bg-[#025632] text-xs font-black text-white transition hover:bg-[#013720] disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         {isRequestingPartialReturn ? <Loader2 className="size-3.5 animate-spin" /> : null}
                         Submit request
@@ -872,7 +872,7 @@ export function OrderDetailView({
               {canReturn ? <button type="button" onClick={() => document.getElementById("order-return-card")?.scrollIntoView({ behavior: "smooth" })} className="rounded-lg border border-zinc-200 p-3">Return or exchange</button> : null}
               {supportUrl ? <a href={supportUrl} className="rounded-lg border border-zinc-200 p-3 text-center">Contact support</a> : <button type="button" disabled className="rounded-lg border border-zinc-200 p-3 text-zinc-400" title="Support contact details have not been configured">Contact support</button>}
               <button type="button" disabled className="rounded-lg border border-zinc-200 p-3 text-zinc-400" title="Invoices are not available in this store yet">View invoice</button>
-              <button type="button" onClick={() => document.getElementById("order-items-card")?.scrollIntoView({ behavior: "smooth" })} className="text-xs text-orange-700 underline">View order details</button>
+              <button type="button" onClick={() => document.getElementById("order-items-card")?.scrollIntoView({ behavior: "smooth" })} className="text-xs text-[#047857] underline">View order details</button>
             </div>
           </section>
         </aside>

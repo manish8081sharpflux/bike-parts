@@ -27,7 +27,7 @@ const pickupIcon = L.divIcon({
 
 const dropIcon = L.divIcon({
   className: "",
-  html: '<div style="background:#ff4b1f;width:28px;height:28px;border-radius:50%;border:3px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center;color:white;font-size:14px;">🏠</div>',
+  html: '<div style="background:#025632;width:28px;height:28px;border-radius:50%;border:3px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center;color:white;font-size:14px;">🏠</div>',
   iconSize: [28, 28],
   iconAnchor: [14, 14],
 });
@@ -80,7 +80,7 @@ export default function DeliveryMap({
           [pickup.lat, pickup.lng],
           [drop.lat, drop.lng],
         ]}
-        pathOptions={{ color: "#ff4b1f", weight: 4, dashArray: "8 8" }}
+        pathOptions={{ color: "#025632", weight: 4, dashArray: "8 8" }}
       />
       <FitBounds pickup={pickup} drop={drop} />
     </MapContainer>

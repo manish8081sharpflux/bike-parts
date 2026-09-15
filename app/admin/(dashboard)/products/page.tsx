@@ -145,7 +145,7 @@ export default async function AdminProductsPage({
         </div>
         <Link
           href="/admin/products/new"
-          className="h-10 shrink-0 rounded-lg bg-[#ff4b1f] px-4 text-sm font-bold leading-10 text-white hover:bg-[#e8330e]"
+          className="h-10 shrink-0 rounded-lg bg-[#025632] px-4 text-sm font-bold leading-10 text-white hover:bg-[#013720]"
         >
           + Add product
         </Link>
@@ -309,7 +309,7 @@ export default async function AdminProductsPage({
                   <div className="flex items-center gap-3">
                     <Link
                       href={`/admin/products/${product.id}`}
-                      className="inline-flex h-8 items-center justify-center rounded-lg border border-zinc-200 px-3 text-xs font-bold text-zinc-700 transition hover:border-orange-200 hover:bg-orange-50 hover:text-orange-700"
+                      className="inline-flex h-8 items-center justify-center rounded-lg border border-zinc-200 px-3 text-xs font-bold text-zinc-700 transition hover:border-[#a7f3d0] hover:bg-[#ecfdf5] hover:text-[#047857]"
                     >
                       Edit
                     </Link>

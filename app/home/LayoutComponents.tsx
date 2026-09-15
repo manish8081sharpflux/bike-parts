@@ -68,7 +68,7 @@ export function AccountMenu({
 
       <div className="absolute right-0 top-full z-50 mt-2 w-72 overflow-hidden rounded-xl bg-white shadow-2xl shadow-zinc-950/20 ring-1 ring-zinc-200">
         <div className="flex items-center gap-3 border-b border-zinc-100 px-4 py-4">
-          <span className="grid size-11 shrink-0 place-items-center rounded-full bg-[#fff0eb] text-[#ff4b1f]">
+          <span className="grid size-11 shrink-0 place-items-center rounded-full bg-[#e9fef5] text-[#025632]">
             <User className="size-5" />
           </span>
           <span className="min-w-0">
@@ -102,7 +102,7 @@ export function AccountMenu({
           <button
             type="button"
             onClick={onLogout}
-            className="flex h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm font-bold text-[#ff4b1f] transition hover:bg-[#fff0eb]"
+            className="flex h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm font-bold text-[#025632] transition hover:bg-[#e9fef5]"
           >
             <LogOut className="size-4.5" />
             Logout

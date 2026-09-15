@@ -393,7 +393,7 @@ export function CatalogView({
                       }}
                       className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs font-bold transition ${
                         activePriceFilter === option.label
-                          ? "bg-[#fff0eb] text-[#ff4b1f]"
+                          ? "bg-[#e9fef5] text-[#025632]"
                           : "text-zinc-700 hover:bg-zinc-50"
                       }`}
                     >
@@ -464,7 +464,7 @@ export function CatalogView({
                       }}
                       className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs font-bold transition ${
                         sortOption === option.value
-                          ? "bg-[#fff0eb] text-[#ff4b1f]"
+                          ? "bg-[#e9fef5] text-[#025632]"
                           : "text-zinc-700 hover:bg-zinc-50"
                       }`}
                     >
@@ -585,7 +585,7 @@ export function CatalogView({
                           onCategoryChange(category);
                           setOpenCategoryPill(null);
                         }}
-                        className="flex w-full items-center justify-center gap-1 border-t border-zinc-100 px-4 py-2.5 text-xs font-black text-[#ff4b1f] transition hover:bg-[#fff3ef]"
+                        className="flex w-full items-center justify-center gap-1 border-t border-zinc-100 px-4 py-2.5 text-xs font-black text-[#025632] transition hover:bg-[#e9fef5]"
                       >
                         Show all {category} parts
                         <ChevronDown className="size-3.5 -rotate-90" />
@@ -614,7 +614,7 @@ export function CatalogView({
             <button
               type="button"
               onClick={() => onCategoryChange("")}
-              className="text-xs font-black text-[#ff4b1f] hover:underline"
+              className="text-xs font-black text-[#025632] hover:underline"
             >
               Show all parts
             </button>
@@ -633,7 +633,7 @@ export function CatalogView({
             <button
               type="button"
               onClick={() => onCategoryChange("")}
-              className="mt-1 text-xs font-bold text-[#ff4b1f] hover:underline"
+              className="mt-1 text-xs font-bold text-[#025632] hover:underline"
             >
               Show all parts
             </button>

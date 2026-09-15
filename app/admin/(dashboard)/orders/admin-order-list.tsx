@@ -288,7 +288,7 @@ export default async function AdminOrderList({
                 <td className="px-4 py-3">
                   <Link
                     href={`/admin/orders/${order.id}`}
-                    className="inline-flex h-8 items-center justify-center rounded-lg border border-zinc-200 px-3 text-xs font-bold text-zinc-700 transition hover:border-orange-200 hover:bg-orange-50 hover:text-orange-700"
+                    className="inline-flex h-8 items-center justify-center rounded-lg border border-zinc-200 px-3 text-xs font-bold text-zinc-700 transition hover:border-[#a7f3d0] hover:bg-[#ecfdf5] hover:text-[#047857]"
                   >
                     View
                   </Link>
